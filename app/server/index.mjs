@@ -397,6 +397,15 @@ async function handleApi(req, res, url) {
    */
 
   /* ---- 画册 ---- */
+  /**
+   * 能力探测：界面据此决定「服务端生成」按钮是可用还是引导到「打印为 PDF」。
+   * 前端不该靠猜——没有浏览器时点了按钮才报错，体验很差。
+   */
+  if (p === '/api/capabilities' && req.method === 'GET') {
+    const { browserStatus } = await import('./browser.mjs');
+    return send(res, 200, { serverPdf: await browserStatus() });
+  }
+
   if (p === '/api/catalog/preview' && req.method === 'POST') {
     const body = await readBody(req);
     const { renderCatalogHtml } = await import('./render-catalog.mjs');
@@ -415,14 +424,20 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const { renderCatalogHtml, renderCatalogPdf, assertLayout } = await import('./render-catalog.mjs');
 
-    let puppeteer;
-    try {
-      puppeteer = (await import('puppeteer')).default;
-    } catch {
-      return fail(res, 501,
-        '未安装 puppeteer，无法在服务端生成 PDF。' +
-        '可改用「在浏览器中打印为 PDF」，或安装 puppeteer 依赖。');
+    /**
+     * 浏览器是**可选**的：便携包里带不带它差 279 MB。
+     * 所以这里不假设它一定在，而是探测；没有就明确告诉用户改用哪条路。
+     */
+    const { loadPuppeteer } = await import('./browser.mjs');
+    const bp = await loadPuppeteer();
+    if (!bp.ok) {
+      return send(res, 501, {
+        error: bp.reason,
+        hint: bp.hint,
+        fallback: 'print',        // 前端据此把用户引到「打印为 PDF」
+      });
     }
+    const { puppeteer, launchOptions } = bp;
 
     const products = await listProducts();
     if (!products.length) return fail(res, 400, '没有产品，无法生成画册');
@@ -433,29 +448,43 @@ async function handleApi(req, res, url) {
       groupByCategory: !!body.groupByCategory,
     });
 
-    // 先断言分页不溢出，避免产出被静默裁掉内容的画册
-    const layout = await assertLayout(html, puppeteer);
-    if (!layout.ok) {
-      const bad = layout.pages.filter((x) => x.overflowing);
-      return send(res, 422, {
-        error: `分页溢出：${bad.length} 页超过 A4 高度，打印会丢失内容`,
-        hint: '请减少每页产品数，或缩短规格文字',
-        pages: layout.pages,
+    try {
+      // 先断言分页不溢出，避免产出被静默裁掉内容的画册
+      const layout = await assertLayout(html, puppeteer, { launchOptions });
+      if (!layout.ok) {
+        const bad = layout.pages.filter((x) => x.overflowing);
+        return send(res, 422, {
+          error: `分页溢出：${bad.length} 页超过 A4 高度，打印会丢失内容`,
+          hint: '请减少每页产品数，或缩短规格文字',
+          pages: layout.pages,
+        });
+      }
+
+      await fs.mkdir(EXPORT_DIR, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const outPath = path.join(EXPORT_DIR, `catalog-${stamp}.pdf`);
+      const result = await renderCatalogPdf(html, puppeteer, outPath, { launchOptions });
+      const fileName = path.basename(result.pdfPath);
+      return send(res, 200, {
+        fileName,
+        downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
+        sizeKB: result.sizeKB,
+        pages: layout.pages.length,
+        layout: layout.pages,
+      });
+    } catch (err) {
+      /**
+       * 浏览器存在但启动/渲染失败（缺依赖库、被杀软拦、路径失效…）。
+       * 报错要给出可操作的方向，不能只甩一句英文异常——
+       * 装机的人看到 "spawn ENOENT" 是没法自救的。
+       */
+      return send(res, 500, {
+        error: `服务端生成失败：${err.message}`,
+        hint: '可以改用「打印为 PDF」——它不依赖服务端，手机也能用。'
+            + `（当前用的浏览器：${launchOptions.executablePath ?? '由 puppeteer 决定'}）`,
+        fallback: 'print',
       });
     }
-
-    await fs.mkdir(EXPORT_DIR, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const outPath = path.join(EXPORT_DIR, `catalog-${stamp}.pdf`);
-    const result = await renderCatalogPdf(html, puppeteer, outPath);
-    const fileName = path.basename(result.pdfPath);
-    return send(res, 200, {
-      fileName,
-      downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
-      sizeKB: result.sizeKB,
-      pages: layout.pages.length,
-      layout: layout.pages,
-    });
   }
 
   return fail(res, 404, '接口不存在');
@@ -566,6 +595,16 @@ async function bootstrap() {
 
   if (syncState) {
     console.log(`  同步枢纽：${couchConfig.base}  数据库 ${syncState.db}  CouchDB ${syncState.version}`);
+  }
+
+  // 浏览器是可选组件（便携包里带不带差 279 MB），所以启动时如实说明能力
+  const { browserStatus } = await import('./browser.mjs');
+  const bs = await browserStatus();
+  if (bs.available) {
+    console.log(`  画册出 PDF：服务端可用（${bs.driver}）`);
+  } else {
+    console.log('  画册出 PDF：服务端不可用，界面会引导用户用「打印为 PDF」');
+    console.log(`    原因：${bs.reason}`);
   }
 
   if (initial.length) {

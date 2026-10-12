@@ -102,6 +102,8 @@ const state = {
   pendingPhoto: null,
   editingOrder: null,      // { id?, items:[], ... }
   syncInfo: sync.snapshot(),
+  /** 服务端能力探测结果（例如有没有浏览器能出 PDF）。见 applyServerPdfCapability */
+  capabilities: null,
 };
 
 /* ------------------------------ 同步状态 ------------------------------ */
@@ -564,6 +566,7 @@ function renderPickList() {
     });
   });
   $('#selCount').textContent = String(state.selected.size);
+  applyServerPdfCapability();     // 每次渲染画册页都按服务端能力调整按钮
 }
 
 const currentSelection = () => (state.selected.size
@@ -607,7 +610,38 @@ async function serverPdf() {
   } finally {
     btn.disabled = false;
     btn.textContent = old;
+    applyServerPdfCapability();
   }
+}
+
+/**
+ * 按服务端能力调整「服务端生成」按钮。
+ *
+ * 为什么要在界面里体现：
+ *   浏览器是可选组件（便携包带不带差 279 MB）。
+ *   没有它时如果按钮看起来正常，用户点了才收到报错——
+ *   对不懂技术的人是纯粹的困惑。不如**事先说清楚**，
+ *   并把主按钮指向真正可用的那条路（打印为 PDF）。
+ */
+function applyServerPdfCapability() {
+  const cap = state.capabilities?.serverPdf;
+  const btn = $('#btnServerPdf');
+  const prev = $('#btnPreview');
+  if (!cap) return;                       // 还没探测到，保持原样
+
+  if (cap.available) {
+    btn.disabled = false;
+    btn.textContent = '服务端生成';
+    btn.title = `用 ${cap.driver} 生成`;
+    prev.classList.remove('btn-primary');
+    return;
+  }
+
+  // 不可用：把按钮变成"说明"而不是"报错入口"
+  btn.textContent = '服务端生成（未安装）';
+  btn.title = cap.reason ?? '';
+  btn.disabled = false;                   // 仍可点，点了给出解释而不是静默
+  prev.classList.add('btn-primary');      // 主按钮让给真正能用的那条路
 }
 
 /* ------------------------------ 设置 ------------------------------ */
@@ -730,6 +764,11 @@ async function loadAll() {
   state.products = prodRes.products;
   state.settings = setRes;
   state.sales = salesRes.sales;
+
+  // 能力探测失败不该影响主流程（比如离线时）——失败就保持 null，界面按原样
+  try {
+    state.capabilities = await api.get('/api/capabilities');
+  } catch { /* 忽略 */ }
   state.viewer = sessionRes.sales ?? null;
   state.signedIn = !!sessionRes.signedIn;
   state.scope = state.viewer?.admin ? 'all' : 'own';

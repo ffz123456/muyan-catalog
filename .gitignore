@@ -32,6 +32,16 @@ deploy/caddy-root.crt
 # 已安装的安装包缓存
 _couchdb-installer/
 
+# Windows 便携版打包时下载的组件（Node 运行时、Chromium 等，几百 MB）
+windows/cache/
+
+# 一键启动生成的运行期文件（含随机密码，绝不入库）
+deploy/管理员密码.txt
+deploy/初始密码.txt
+
+# Chromium 在某些机器上会往工作目录写这个（输入法相关），不是我们的东西
+debug.log
+
 # 可再生缓存（体积大）
 .npm-cache/
 .puppeteer-cache/

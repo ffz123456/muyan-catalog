@@ -168,8 +168,11 @@ export async function renderCatalogHtml({ products, settings, assetDir, groupByC
 /**
  * 用 Puppeteer 实测每页高度，断言无溢出。
  * 返回 { ok, pages:[{page,heightPx,overflowPx,overflowing}] }
+ *
+ * `launchOptions` 由调用方传入（见 server/browser.mjs）：
+ *   便携版需要显式指定浏览器路径，不能靠 puppeteer 自己找。
  */
-export async function assertLayout(html, puppeteer, { writeDebugHtml } = {}) {
+export async function assertLayout(html, puppeteer, { writeDebugHtml, launchOptions = {} } = {}) {
   const USER_DATA = path.join(import.meta.dirname, '..', 'data', '.chrome-profile');
   await fs.rm(USER_DATA, { recursive: true, force: true });
 
@@ -184,6 +187,7 @@ export async function assertLayout(html, puppeteer, { writeDebugHtml } = {}) {
     headless: true,
     userDataDir: USER_DATA,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+    ...launchOptions,
   });
   try {
     const page = await browser.newPage();
@@ -218,7 +222,7 @@ export async function assertLayout(html, puppeteer, { writeDebugHtml } = {}) {
  * ⚠️ 必须走 CDP Page.printToPDF 直写：page.pdf() 的流式回传在当前环境会
  *    报 Protocol error (IO.read)，实测不可用。
  */
-export async function renderCatalogPdf(html, puppeteer, outPath, { previewDir } = {}) {
+export async function renderCatalogPdf(html, puppeteer, outPath, { previewDir, launchOptions = {} } = {}) {
   const USER_DATA = path.join(import.meta.dirname, '..', 'data', '.chrome-profile');
   await fs.rm(USER_DATA, { recursive: true, force: true });
 
@@ -230,6 +234,7 @@ export async function renderCatalogPdf(html, puppeteer, outPath, { previewDir } 
     headless: true,
     userDataDir: USER_DATA,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+    ...launchOptions,
   });
   try {
     const page = await browser.newPage();

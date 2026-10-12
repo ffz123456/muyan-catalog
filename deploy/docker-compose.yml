@@ -16,7 +16,10 @@ services:
   # ------------------------------------------------------------------
   couchdb:
     image: couchdb:3.5
-    container_name: fs-couchdb
+    # 刻意不写 container_name：硬编码容器名会让「同一台机器上跑第二套」直接失败
+    # （报 Conflict: container name is already in use）。实测踩过——
+    # 想开一套临时环境做验证都开不起来。Compose 默认按「项目名-服务名」命名，
+    # 天然支持多套并存。
     restart: unless-stopped
     environment:
       # 官方镜像会用这两个变量在首次启动时创建管理员
@@ -42,7 +45,6 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    container_name: fs-app
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -74,7 +76,6 @@ services:
   # ------------------------------------------------------------------
   caddy:
     image: caddy:2-alpine
-    container_name: fs-caddy
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-80}:80"
