@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>家具开单与画册</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="topbar-title">家具开单</div>
+    <div class="topbar-right">
+      <button class="sync-chip" id="syncChip" title="点一下立即同步">
+        <span class="sync-dot" id="syncDot"></span><span id="syncText">同步中…</span>
+      </button>
+      <button class="who" id="btnWho" title="切换销售">
+        <span id="whoName">未登录</span>
+      </button>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="order" role="tab">开单</button>
+    <button class="tab" data-tab="products" role="tab">产品</button>
+    <button class="tab" data-tab="catalog" role="tab">画册</button>
+    <button class="tab" data-tab="settings" role="tab">设置</button>
+  </nav>
+</header>
+
+<!-- 未登录时遮住全部界面：没有身份就没有 sales_id，出的单无处归属 -->
+<div class="login" id="loginGate" hidden>
+  <div class="login-box">
+    <h2>登录</h2>
+    <p class="hint">
+      订单按销售人员隔离 —— <strong>只能看到自己出的单</strong>，所以必须用你自己的账号登录。
+    </p>
+    <form id="loginForm" class="form">
+      <label>账号
+        <select name="name" id="loginUser" required></select>
+      </label>
+      <label>密码
+        <input name="password" type="password" autocomplete="current-password" required placeholder="请输入密码">
+      </label>
+      <button class="btn btn-primary btn-lg" type="submit">登录</button>
+    </form>
+    <p class="hint" style="margin-top:12px">
+      首次使用：初始密码在<strong>服务端启动日志</strong>里打印过一次，首次登录后需修改。
+      忘了密码可删除 <code>app/data/sales.json</code> 重新初始化。
+    </p>
+  </div>
+</div>
+
+<main>
+
+<!-- ============ 开单 ============ -->
+<section class="panel is-active" id="panel-order">
+  <div class="stats" id="orderStats"></div>
+
+  <div class="panel-head">
+    <div class="count" id="orderCount">—</div>
+    <button class="btn btn-primary btn-lg" id="btnNewOrder">＋ 新开一单</button>
+  </div>
+
+  <div class="scope-note" id="scopeNote" hidden></div>
+  <div id="orderList" class="list"></div>
+  <div class="empty" id="orderEmpty" hidden>
+    <p>还没有订单</p>
+    <button class="btn btn-primary btn-lg" id="btnNewOrder2">＋ 开第一单</button>
+  </div>
+</section>
+
+<!-- ============ 产品 ============ -->
+<section class="panel" id="panel-products">
+  <div class="panel-head">
+    <div class="count" id="productCount">—</div>
+    <button class="btn btn-primary btn-lg" id="btnAdd">＋ 添加产品</button>
+  </div>
+  <div id="productList" class="list"></div>
+  <div class="empty" id="productEmpty" hidden>
+    <p>还没有产品</p>
+    <button class="btn btn-primary btn-lg" id="btnAddEmpty">＋ 添加第一个产品</button>
+  </div>
+</section>
+
+<!-- ============ 画册 ============ -->
+<section class="panel" id="panel-catalog">
+  <div class="panel-head">
+    <div class="count"><span id="selCount">0</span> 款已选</div>
+    <div class="row">
+      <button class="btn" id="btnSelectAll">全选</button>
+      <button class="btn" id="btnSelectNone">全不选</button>
+    </div>
+  </div>
+  <label class="switch">
+    <input type="checkbox" id="cbGroup">
+    <span>按品类分节（每个品类从新页开始）</span>
+  </label>
+  <div id="pickList" class="list"></div>
+  <div class="actionbar">
+    <button class="btn btn-lg" id="btnPreview">打印为 PDF</button>
+    <button class="btn btn-primary btn-lg" id="btnServerPdf">服务端生成</button>
+  </div>
+  <p class="hint">
+    「打印为 PDF」→ 在弹出的打印窗口把目标选为「另存为 PDF」，什么都不用装，手机也能用。
+  </p>
+  <div id="catalogResult"></div>
+</section>
+
+<!-- ============ 设置 ============ -->
+<section class="panel" id="panel-settings">
+  <div class="panel-head"><div class="count">公司信息（印在画册封面上）</div></div>
+  <form id="settingsForm" class="form">
+    <label>公司名称<input name="companyName" placeholder="例如：林氏家居"></label>
+    <label>画册副标题<input name="tagline" placeholder="例如：2026 春季新品画册"></label>
+    <label>联系方式<input name="contact" placeholder="例如：电话 138-0000-0000 · 微信 xxx"></label>
+    <label>报价有效期（天）<input name="validityDays" type="number" min="0" max="365" placeholder="30"></label>
+    <div class="field">
+      <span class="field-label">公司 Logo（可选）</span>
+      <div class="logo-row">
+        <img id="logoPreview" class="logo-preview" alt="" hidden>
+        <button type="button" class="btn" id="btnLogoPick">选择图片</button>
+        <button type="button" class="btn btn-danger" id="btnLogoClear" hidden>移除</button>
+      </div>
+      <input type="file" id="logoInput" accept="image/*" hidden>
+    </div>
+    <button class="btn btn-primary btn-lg" type="submit">保存设置</button>
+  </form>
+  <div class="save-msg" id="saveMsg" hidden>已保存</div>
+
+  <hr class="sep">
+  <div class="panel-head">
+    <div class="count">销售人员账号</div>
+    <button class="btn btn-primary" id="btnAddAccount" hidden>＋ 新建账号</button>
+  </div>
+  <div id="salesList" class="list"></div>
+  <p class="hint" id="salesHint">
+    销售<strong>只能看到自己的订单</strong>，管理者可以看全部。
+  </p>
+  <p class="hint" id="salesAdminHint" hidden>
+    你是管理者：可以新建账号、重置密码、停用离职人员。
+    <strong>新建账号后请把初始密码当面告知本人</strong>——它只显示这一次。
+  </p>
+</section>
+
+</main>
+
+<!-- ============ 账号编辑弹层 ============ -->
+<div class="sheet" id="acctSheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span id="acctTitle">新建账号</span>
+      <button class="btn btn-ghost" id="btnCloseAcct" aria-label="关闭">✕</button>
+    </div>
+    <form id="acctForm" class="form">
+      <input type="hidden" name="originalName">
+
+      <label>登录名 <span class="req">*</span>
+        <input name="name" required autocomplete="off" placeholder="小写字母/数字，例如 zhangsan">
+      </label>
+      <label>姓名
+        <input name="display" autocomplete="off" placeholder="例如：张三">
+      </label>
+      <label>邮箱（可选）
+        <input name="email" type="email" autocomplete="off" placeholder="仅作联系记录">
+      </label>
+
+      <div class="field" id="acctFlags">
+        <label class="check-line">
+          <input type="checkbox" name="admin">
+          <span>管理员（能看到<strong>全部</strong>销售的订单，并管理账号）</span>
+        </label>
+        <label class="check-line">
+          <input type="checkbox" name="active" checked>
+          <span>启用（取消勾选= 停用，离职人员用这个，<strong>订单不会被删</strong>）</span>
+        </label>
+      </div>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn" id="btnResetPw" hidden>重置密码</button>
+        <button type="button" class="btn btn-danger" id="btnDelAcct" hidden>删除账号</button>
+        <button type="submit" class="btn btn-primary btn-lg">保存</button>
+      </div>
+    </form>
+
+    <!-- 一次性密码展示：关掉就再也拿不回来 -->
+    <div class="once-box" id="onceBox" hidden>
+      <div class="once-title">⚠️ 这串密码只显示这一次</div>
+      <div class="once-pw" id="oncePw">—</div>
+      <p class="hint">
+        请<strong>当场记下或直接念给本人</strong>。系统只保存加密后的内容，
+        关掉这个窗口后就再也查不出来了——忘了只能再重置一次。
+      </p>
+      <button type="button" class="btn btn-primary" id="btnOnceDone">我已记下</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 开单弹层 ============ -->
+<div class="sheet" id="orderSheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span id="orderSheetTitle">新开一单</span>
+      <button class="btn btn-ghost" id="btnCloseOrder" aria-label="关闭">✕</button>
+    </div>
+
+    <form id="orderForm" class="form">
+      <input type="hidden" name="id">
+
+      <div class="row-2">
+        <label>客户称呼<input name="customer_name" autocomplete="off" placeholder="例如：张先生"></label>
+        <label>电话（可选）<input name="customer_phone" type="tel" inputmode="tel" placeholder="138…"></label>
+      </div>
+
+      <div class="field">
+        <span class="field-label">选了哪些货</span>
+        <div id="orderItems" class="order-items"></div>
+        <div class="add-item-row">
+          <button type="button" class="btn btn-lg" id="btnAddItem">＋ 加一个产品</button>
+        </div>
+      </div>
+
+      <div class="total-box">
+        <div class="total-line"><span>目录价合计</span><span id="sumList">¥0</span></div>
+        <div class="total-line"><span>让利</span><span id="sumDiscount">¥0</span></div>
+        <div class="total-line total-main"><span>应收</span><span id="sumTotal">¥0</span></div>
+      </div>
+
+      <label>备注（可选）<input name="remark" autocomplete="off" placeholder="例如：包送货安装"></label>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-danger" id="btnDeleteOrder" hidden>删除这单</button>
+        <button type="submit" class="btn btn-primary btn-lg">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ 选产品弹层 ============ -->
+<div class="sheet" id="pickSheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span>选产品</span>
+      <button class="btn btn-ghost" id="btnClosePick" aria-label="关闭">✕</button>
+    </div>
+    <input type="search" id="pickSearch" placeholder="搜产品名或品类…" autocomplete="off">
+    <!-- 图片优先的网格：销售认货靠图不靠型号文字 -->
+    <div id="pickSource" class="pick-grid"></div>
+    <!-- 勾选后从底部浮出，点一次把选中的货全部加入订单 -->
+    <div class="pick-bar" id="pickBar" hidden>
+      <span id="pickBarCount">已选 0 款</span>
+      <button type="button" class="btn btn-primary" id="btnPickConfirm">加入订单</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 切换销售弹层 ============ -->
+<div class="sheet" id="whoSheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span>现在是谁在用</span>
+      <button class="btn btn-ghost" id="btnCloseWho" aria-label="关闭">✕</button>
+    </div>
+    <div id="whoList" class="list"></div>
+  </div>
+</div>
+
+<!-- ============ 产品编辑弹层 ============ -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span id="sheetTitle">添加产品</span>
+      <button class="btn btn-ghost" id="btnCloseSheet" aria-label="关闭">✕</button>
+    </div>
+
+    <form id="productForm" class="form">
+      <input type="hidden" name="id">
+
+      <div class="field">
+        <span class="field-label">产品图片</span>
+        <div class="photo-row">
+          <img id="photoPreview" class="photo-preview" alt="" hidden>
+          <div class="photo-actions">
+            <button type="button" class="btn btn-primary btn-lg" id="btnCamera">📷 拍照 / 选图</button>
+            <button type="button" class="btn" id="btnPhotoClear" hidden>移除图片</button>
+          </div>
+        </div>
+        <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+      </div>
+
+      <label>产品名称 <span class="req">*</span>
+        <input name="name" required autocomplete="off" placeholder="例如：云舒三人布艺沙发">
+      </label>
+      <label>品类
+        <input name="category" list="catList" autocomplete="off" placeholder="客厅 · 沙发">
+        <datalist id="catList"></datalist>
+      </label>
+      <label>规格
+        <textarea name="specs" rows="2" placeholder="尺寸 2200×950×820mm / 材质 科技布"></textarea>
+      </label>
+      <label>卖点（用 / 分隔，会自动变成标签）
+        <input name="highlights" autocomplete="off" placeholder="可拆洗 / 三年质保">
+      </label>
+      <div class="row-2">
+        <label>价格<input name="price" type="number" min="0" step="1" inputmode="decimal" placeholder="4380"></label>
+        <label>货期
+          <select name="stockStatus">
+            <option>现货</option>
+            <option>定制 15 天</option>
+            <option>定制 30 天</option>
+            <option>需询价</option>
+          </select>
+        </label>
+      </div>
+      <label>货源 / 厂家（可选）<input name="supplier" autocomplete="off" placeholder="例如：广东佛山厂"></label>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-danger" id="btnDelete" hidden>删除</button>
+        <button type="submit" class="btn btn-primary btn-lg">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- ============ 修改密码弹层 ============ -->
+<div class="sheet" id="pwSheet" hidden>
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span>修改密码</span>
+      <button class="btn btn-ghost" id="btnClosePw" aria-label="关闭">✕</button>
+    </div>
+    <p class="hint" id="pwMsg" hidden></p>
+    <form id="pwForm" class="form">
+      <label>原密码
+        <input name="oldPassword" type="password" autocomplete="current-password" required>
+      </label>
+      <label>新密码（至少 6 位）
+        <input name="newPassword" type="password" autocomplete="new-password" minlength="6" required>
+      </label>
+      <label>再输一次新密码
+        <input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required>
+      </label>
+      <button class="btn btn-primary btn-lg" type="submit">保存新密码</button>
+    </form>
+  </div>
+</div>
+
+<!-- PouchDB 浏览器构建（本地离线库）。缺失时请运行 tools/vendor-pouchdb.mjs -->
+<script src="/vendor/pouchdb.min.js"></script>
+<script type="module" src="/app.mjs"></script>
+</body>
+</html>

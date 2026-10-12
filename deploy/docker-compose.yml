@@ -1,0 +1,100 @@
+# 家具经销商 · 电子画册与开单工具 —— 一键部署
+#
+# 用法：
+#   1. 复制 .env.example 为 .env，改掉里面的密码
+#   2. docker compose up -d
+#   3. docker compose logs app | findstr 初始密码      （取初始登录密码）
+#   4. 浏览器打开 http://<本机IP>
+#
+# 对装机的人来说就这四步。建库、写权限文档、建账号、装字体全部自动完成
+# （见 app/server/startup.mjs）。
+
+services:
+
+  # ------------------------------------------------------------------
+  # 同步枢纽：CouchDB。订单的权威副本存这里。
+  # ------------------------------------------------------------------
+  couchdb:
+    image: couchdb:3.5
+    container_name: fs-couchdb
+    restart: unless-stopped
+    environment:
+      # 官方镜像会用这两个变量在首次启动时创建管理员
+      COUCHDB_USER: ${COUCHDB_ADMIN_USER:-admin}
+      COUCHDB_PASSWORD: ${COUCHDB_ADMIN_PASS:?必须在 .env 里设置 COUCHDB_ADMIN_PASS}
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+    # 只在内网暴露，不对宿主开放 5984——所有访问都经应用代理
+    expose:
+      - "5984"
+    healthcheck:
+      # 认证已启用，健康检查必须带凭据
+      test: ["CMD-SHELL", "curl -fsS -u \"$$COUCHDB_USER:$$COUCHDB_PASSWORD\" http://127.0.0.1:5984/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ------------------------------------------------------------------
+  # 应用：服务端 + 界面 + 同步代理（授权在这里执行）
+  # ------------------------------------------------------------------
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: fs-app
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      COUCHDB_URL: http://couchdb:5984
+      COUCHDB_ADMIN_USER: ${COUCHDB_ADMIN_USER:-admin}
+      COUCHDB_ADMIN_PASS: ${COUCHDB_ADMIN_PASS:?必须在 .env 里设置 COUCHDB_ADMIN_PASS}
+      COUCHDB_DB: ${COUCHDB_DB:-orders}
+      # 部署环境**不要**开这个（免密登录只在开发用）
+      DEV_ALLOW_PASSWORDLESS_LOGIN: "0"
+    volumes:
+      # 产品数据、上传的图片、导出的 PDF、销售账号都在这里，必须持久化
+      - app-data:/srv/app/data
+    depends_on:
+      couchdb:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  # ------------------------------------------------------------------
+  # HTTPS 反向代理：Caddy
+  #
+  # 为什么必须有：当前应用是 HTTP，登录密码是明文过网的。
+  # 不配 HTTPS，刚做的密码认证等于白做（主文档技术债务 #26）。
+  #
+  # Caddy 的两种模式见 deploy/Caddyfile：
+  #   - 内网 IP / 自签：自动生成内部 CA 证书，浏览器首次需信任一次
+  #   - 有域名：自动申请并续期 Let's Encrypt 证书，零配置
+  # ------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: fs-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      # 站点地址。默认用 https://localhost，内网部署时改成实际地址，
+      # 例如 SITE_ADDRESS=192.168.1.10 或 SITE_ADDRESS=orders.example.com
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      # 外部 HTTPS 端口。非 443 时必须传进来，
+      # 否则 HTTP->HTTPS 跳转会指到 443（那里没有服务）——见 Caddyfile 说明
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  couchdb-data:
+  app-data:
+  caddy-data:
+  caddy-config:

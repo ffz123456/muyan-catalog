@@ -1,0 +1,16 @@
+{
+  "name": "furniture-catalog-spike",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "画册生成链路验证：确认 pdf-catalog-generator 能否满足中文家具画册需求",
+  "scripts": {
+    "generate": "node generate-catalog.mjs"
+  },
+  "license": "GPL-3.0",
+  "dependencies": {
+    "pdf-catalog-generator": "^3.1.4",
+    "puppeteer": "^25.13.0",
+    "react": "^18.3.1"
+  }
+}

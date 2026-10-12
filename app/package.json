@@ -1,0 +1,12 @@
+{
+  "name": "furniture-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "家具经销商电子画册与开单工具 —— 应用主体（单进程，零外部依赖）",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "catalog": "node server/cli-catalog.mjs"
+  },
+  "license": "GPL-3.0"
+}

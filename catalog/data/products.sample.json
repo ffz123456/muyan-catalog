@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "companyName": "林氏家居",
+    "companyLogo": null,
+    "tagline": "2026 春季新品画册 · 全屋定制系列",
+    "currency": "CNY",
+    "note": "本画册由家具销售轻量工具生成，图片为示意素材"
+  },
+  "products": [
+    {
+      "id": "FS-1001",
+      "name": "云舒三人布艺沙发",
+      "category": "客厅 · 沙发",
+      "price": 4380,
+      "specs": "尺寸 2200×950×820mm / 材质 科技布 · 高回弹海绵 / 框架 实木",
+      "highlights": "可拆洗 / 三年质保 / 含两个抱枕",
+      "image": "assets/sofa.png",
+      "stockStatus": "现货"
+    },
+    {
+      "id": "FS-2013",
+      "name": "白蜡木实木茶几",
+      "category": "客厅 · 茶几",
+      "price": 1680,
+      "specs": "尺寸 1200×600×450mm / 材质 北美白蜡木 / 表面 木蜡油",
+      "highlights": "双层收纳 / 圆角防磕碰",
+      "image": "assets/coffee-table.png",
+      "stockStatus": "现货"
+    },
+    {
+      "id": "FS-3027",
+      "name": "黑胡桃玻璃展示柜",
+      "category": "餐厅 · 边柜",
+      "price": 3260,
+      "specs": "尺寸 900×420×1800mm / 材质 黑胡桃实木 / 门板 钢化玻璃",
+      "highlights": "三层可调隔板 / 防倾倒设计",
+      "image": "assets/curio-cabinet.png",
+      "stockStatus": "定制 15 天"
+    },
+    {
+      "id": "FS-4056",
+      "name": "橡木伸缩餐桌（一桌四椅）",
+      "category": "餐厅 · 餐桌椅",
+      "price": 5980,
+      "specs": "尺寸 1400-1800×800×750mm / 材质 白橡木 / 伸缩 40cm",
+      "highlights": "可坐 4-6 人 / 含四把配套餐椅",
+      "image": "assets/dining-set.png",
+      "stockStatus": "现货"
+    },
+    {
+      "id": "FS-5008",
+      "name": "榉木落地衣帽架",
+      "category": "卧室 · 衣帽架",
+      "price": 458,
+      "specs": "尺寸 420×420×1750mm / 材质 榉木 / 承重 15kg",
+      "highlights": "八爪底座 / 免工具安装",
+      "image": "assets/coat-rack.png",
+      "stockStatus": "现货"
+    }
+  ]
+}

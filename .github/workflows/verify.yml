@@ -1,0 +1,108 @@
+name: 验证
+
+# 每次推送与 PR 都跑一遍验证套件。
+#
+# 为什么值得有：这个项目的所有结论都是"实测出来的"，
+# 而不是"看起来应该对"。没有 CI 的话，下一个人改完代码
+# 只能靠手工跑一堆脚本才知道有没有弄坏东西。
+#
+# 注意：跑的是**后端套件**（认证 / 账号 / 出单 / 真实 CouchDB / 同步代理）。
+# 界面套件需要 Chromium，本地跑更合适，不放在这里。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      # 与生产用同一个大版本，避免"CI 过了但线上挂"
+      couchdb:
+        image: couchdb:3.5
+        env:
+          COUCHDB_USER: admin
+          COUCHDB_PASSWORD: ci-test-pass
+        ports:
+          - 5984:5984
+        options: >-
+          --health-cmd "curl -fsS -u admin:ci-test-pass http://127.0.0.1:5984/ >/dev/null"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      COUCHDB_URL: http://127.0.0.1:5984
+      COUCHDB_ADMIN_USER: admin
+      COUCHDB_ADMIN_PASS: ci-test-pass
+      COUCHDB_APP_USER: app
+      COUCHDB_APP_PASS: app-ci-pass
+      COUCHDB_DB: orders
+      # 免密登录只在回环地址上生效，CI 里服务绑 127.0.0.1 所以可用。
+      # 这样测试脚本不必硬编码密码。
+      DEV_ALLOW_PASSWORDLESS_LOGIN: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 界面需要 PouchDB 浏览器构建；后端套件也用到 pouchdb（Node 构建）
+      - name: 安装验证所需依赖
+        run: |
+          cd sync && npm ci --no-audit --no-fund
+          cd ../app && npm install --no-save --no-audit --no-fund pouchdb
+
+      - name: 生成 PouchDB 浏览器构建
+        run: cd app && node tools/vendor-pouchdb.mjs
+
+      - name: 启动服务端
+        run: |
+          cd app
+          # 删掉账号文件，让它重新初始化 —— 这样能顺便验证
+          # "首次启动自动生成初始密码"这条链路本身。
+          rm -f data/sales.json data/current-sales.json
+          node server/index.mjs > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/session >/dev/null 2>&1; then
+              echo "服务端已就绪"; break
+            fi
+            sleep 1
+          done
+          cat /tmp/server.log
+
+      # 从启动日志里抓初始密码，供 verify-auth 用真实密码路径跑。
+      # 不硬编码密码：每次 CI 都是新生成的。
+      - name: 提取初始密码
+        run: |
+          grep -E '^ +[a-z0-9_]+ +[a-z0-9]{10} +（' /tmp/server.log > /tmp/pw.txt || true
+          cat /tmp/pw.txt
+          for n in admin alice bob; do
+            v=$(awk -v n="$n" '$1==n {print $2}' /tmp/pw.txt | head -1)
+            echo "PW_$(echo $n | tr a-z A-Z)=$v" >> "$GITHUB_ENV"
+          done
+          echo "已提取："; grep '^PW_' "$GITHUB_ENV" | sed 's/=.*/=<已隐藏>/'
+
+      - name: 出单模块
+        run: cd app && node tools/verify-orders.mjs
+
+      - name: 真实 CouchDB 隔离
+        run: cd app && node tools/verify-real-couchdb.mjs
+
+      - name: 同步代理授权
+        run: cd app && node tools/verify-sync-proxy.mjs
+
+      - name: 认证
+        run: cd app && node tools/verify-auth.mjs
+
+      - name: 账号管理
+        run: cd app && node tools/verify-accounts.mjs
+
+      - name: 失败时输出服务端日志
+        if: failure()
+        run: cat /tmp/server.log || true

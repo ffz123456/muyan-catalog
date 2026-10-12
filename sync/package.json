@@ -1,0 +1,15 @@
+{
+  "name": "furniture-sync-spike",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "第 1 步验证：PouchDB ↔ CouchDB 协议服务端的过滤同步与订单隔离",
+  "scripts": {
+    "verify": "node verify-sync.mjs"
+  },
+  "license": "GPL-3.0",
+  "dependencies": {
+    "pouchdb": "^9.0.0",
+    "pouchdb-server": "^4.2.0"
+  }
+}

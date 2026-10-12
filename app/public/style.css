@@ -1,0 +1,533 @@
+/* 家具画册与开单 —— 界面样式
+   原则（主文档 §14）：大按钮、少输入框、能选就不打字。
+   触摸目标不小于 44px，字号不低于 15px。 */
+
+:root {
+  --ink: #2b2320;
+  --ink-soft: #6d625b;
+  --ink-mute: #9a908a;
+  --line: #e3dcd3;
+  --paper: #fff;
+  --bg: #f6f3ef;
+  --accent: #8a5a3b;
+  --accent-dark: #6f452b;
+  --accent-bg: #f7f2ec;
+  --ok: #4f8a4a;
+  --warn: #c8912f;
+  --danger: #b4443a;
+  --radius: 10px;
+  --tap: 48px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* 关键：display 属性会压过 [hidden] 的默认 display:none。
+   本文件里 .sheet / .toast / .photo-preview 等都设了 display，
+   若不强制，隐藏的编辑弹层会继续覆盖全屏并吃掉所有点击。 */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  font-size: 16px; line-height: 1.5;
+}
+
+/* ---------------- 顶栏 ---------------- */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 16px 0;
+}
+.topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.topbar-title { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.who {
+  min-height: 36px; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 18px;
+  background: var(--accent-bg); color: var(--accent);
+  font-size: 14px; font-family: inherit; font-weight: 600; cursor: pointer;
+}
+
+/* ---------------- 同步状态（只用"已同步/未同步"，不露技术细节） ---------------- */
+.sync-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 18px;
+  background: var(--paper); color: var(--ink-soft);
+  font-size: 13px; font-family: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+.sync-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mute);
+  flex: 0 0 8px;
+}
+.sync-dot.is-ok { background: var(--ok); }
+.sync-dot.is-busy { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.sync-dot.is-warn { background: var(--warn); }
+.sync-dot.is-err { background: var(--danger); }
+.sync-dot.is-off { background: var(--ink-mute); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* ---------------- 登录闸门 ---------------- */
+.login {
+  position: fixed; inset: 0; z-index: 80;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.login-box {
+  width: 100%; max-width: 420px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 16px; padding: 22px;
+}
+.login-box h2 { margin: 0 0 8px; font-size: 20px; }
+.login-box .hint { margin-bottom: 16px; }
+
+.tabs { display: flex; gap: 4px; margin-top: 8px; }
+.tab {
+  flex: 1; min-height: 44px;
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 16px; font-family: inherit; color: var(--ink-soft);
+  border-bottom: 3px solid transparent;
+  padding: 8px 2px;
+}
+.tab.is-active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+
+main { padding: 16px; max-width: 900px; margin: 0 auto 96px; }
+.panel { display: none; }
+.panel.is-active { display: block; }
+
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.count { font-size: 15px; color: var(--ink-soft); }
+.row { display: flex; gap: 8px; }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sep { border: 0; border-top: 1px solid var(--line); margin: 28px 0 20px; }
+
+/* ---------------- 经营概览 ---------------- */
+.stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  margin-bottom: 16px;
+}
+.stat {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 10px; text-align: center;
+}
+.stat-num { font-size: 20px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+.stat-label { font-size: 12px; color: var(--ink-mute); margin-top: 4px; }
+
+.scope-note {
+  background: var(--accent-bg); border: 1px solid #e8ddd0; border-radius: var(--radius);
+  padding: 10px 12px; font-size: 14px; color: var(--ink-soft); margin-bottom: 14px;
+}
+
+/* ---------------- 开单项 ---------------- */
+.order-items { display: flex; flex-direction: column; gap: 10px; }
+
+/*
+ * 开单项布局：**图 + 名称一行，数量 + 价格占满下一行**。
+ *
+ * 试过两种排版，记录为什么选这个：
+ *   A. 左图 + 右内容两列：图一大（88px）右列就不够宽，
+ *      数量与价格被挤成竖排，左侧留出一大块空白，整行很散。
+ *   B. 图与名称一行、控件整行（当前）：图能放大到 88px，
+ *      数量与价格在一行内并排，右侧不留空。
+ * 390pt 宽度下 B 明显更整齐，也更少误触。
+ */
+.oitem {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "thumb head"
+    "controls controls"
+    "sub sub";
+  gap: 9px 10px;
+  align-items: start;
+}
+/*
+ * 开单项缩略图：104px。
+ *
+ * 尺寸是配合左侧那一行的高度定的：名称 + 品类/目录价大约占 120px，
+ * 图小于这个数就会在图下方留一块空白，看着像没对齐（试过 88px）。
+ * 104px 基本填满，既不留空也没溢出。
+ *
+ * 为什么不做得更大：这一屏是**销售在客户面前核对货**的地方，
+ * 认错款代价最直接（报错价、发错货），所以图要够大够清楚；
+ * 但再大就会把数量与价格挤出屏幕，那更影响出单速度。
+ */
+.oitem-thumb {
+  grid-area: thumb;
+  width: 104px; height: 104px;
+  border-radius: 8px; overflow: hidden; background: #f1ece5;
+  display: flex; align-items: center; justify-content: center;
+}
+.no-img-sm { font-size: 11px; color: var(--ink-mute); }
+
+.oitem-head {
+  grid-area: head;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;
+  min-width: 0;
+}
+.oitem-titles { min-width: 0; }
+.oitem-name { font-size: 15px; font-weight: 600; line-height: 1.35; }
+.oitem-remove {
+  border: 0; background: transparent; color: var(--danger);
+  font-size: 19px; line-height: 1; padding: 0 2px; min-height: 30px;
+  cursor: pointer; flex: 0 0 auto;
+}
+.oitem-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.oitem-cat {
+  font-size: 11.5px; color: var(--accent); background: var(--accent-bg);
+  padding: 1px 7px; border-radius: 10px; white-space: nowrap;
+}
+.oitem-list { font-size: 12.5px; color: var(--ink-mute); }
+
+.oitem-controls {
+  grid-area: controls;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
+}
+.qty {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+}
+.qty button {
+  width: 44px; height: 44px; border: 0; background: var(--accent-bg);
+  font-size: 20px; color: var(--accent); cursor: pointer; font-family: inherit;
+}
+.qty input {
+  width: 60px; min-height: 44px; text-align: center; border: 0;
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  border-radius: 0; font-size: 16px; padding: 0;
+}
+.oitem-price { text-align: right; }
+.oitem-price .price-label {
+  display: block; font-size: 11.5px; color: var(--ink-mute); margin-bottom: 2px;
+}
+.oitem-price input {
+  width: 108px; min-height: 44px; text-align: right; font-size: 16px;
+}
+.oitem-sub { grid-area: sub; font-size: 12.5px; color: var(--ink-mute); text-align: right; }
+.oitem-sub.is-cut { color: var(--danger); }
+.add-item-row { margin-top: 10px; }
+.add-item-row .btn { width: 100%; }
+
+/* ---------------- 选产品：图片网格 ---------------- */
+
+/*
+ * 网格而不是竖排列表：一屏能扫到十几款，缩略图也大得多。
+ * 竖排列表一屏只看得见四五款，图小到看不清款式，选错款概率明显更高。
+ * 两列是手机上图片清晰度与一屏信息量的平衡点。
+ */
+.pick-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 10px; margin-top: 12px;
+  padding-bottom: 8px;
+}
+.pick-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--paper); padding: 0; overflow: hidden;
+  cursor: pointer; font-family: inherit; text-align: left;
+  display: flex; flex-direction: column;
+  transition: border-color .12s, box-shadow .12s;
+}
+.pick-card:active { transform: scale(.985); }
+.pick-card.is-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg) inset;
+}
+.pick-card-img {
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
+  background: #f1ece5; display: flex; align-items: center; justify-content: center;
+}
+.pick-card-img img { display: block; }
+.pick-card-img .no-img { font-size: 12px; color: var(--ink-mute); }
+.pick-card-check {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+.pick-card-body { padding: 8px 9px 10px; display: flex; flex-direction: column; gap: 2px; }
+.pick-card-name {
+  font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--ink);
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.pick-card-cat { font-size: 11.5px; color: var(--ink-mute); }
+.pick-card-price { font-size: 15px; font-weight: 700; color: var(--accent); margin-top: 2px; }
+
+/* 底部确认条：勾选后才浮出，误触不了 */
+.pick-bar {
+  position: sticky; bottom: 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding: 10px 0 4px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0) 0%, var(--paper) 30%);
+  border-top: 1px solid var(--line);
+}
+.pick-bar span { font-size: 14px; color: var(--ink-soft); font-weight: 600; }
+.pick-bar .btn { min-width: 140px; }
+
+/* ---------------- 合计 ---------------- */
+.total-box {
+  background: var(--accent-bg); border: 1px solid #e8ddd0;
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.total-line {
+  display: flex; justify-content: space-between;
+  font-size: 14px; color: var(--ink-soft); padding: 3px 0;
+}
+.total-main {
+  border-top: 1px solid #e0d3c4; margin-top: 8px; padding-top: 10px;
+  font-size: 18px; font-weight: 700; color: var(--accent);
+}
+
+/* ---------------- 按钮 ---------------- */
+.btn {
+  min-height: 44px; padding: 10px 16px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink);
+  font-size: 15px; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn:active { transform: translateY(1px); }
+.btn-lg { min-height: var(--tap); padding: 12px 20px; font-size: 16px; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn-primary:active { background: var(--accent-dark); }
+.btn-danger { color: var(--danger); border-color: #e6c9c6; background: #fdf6f5; }
+.btn-ghost { border: 0; background: transparent; font-size: 20px; padding: 6px 12px; min-height: 44px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------------- 列表 ---------------- */
+.list { display: flex; flex-direction: column; gap: 10px; }
+
+.item {
+  display: flex; gap: 12px; align-items: center;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px;
+  cursor: pointer;
+}
+.item:active { background: var(--accent-bg); }
+.item.is-off { opacity: .45; }
+/*
+ * 列表缩略图：正方形、80px。
+ *
+ * 原来是 76×60 的扁矩形，图片能占的面积太小；改成正方形后，
+ * 同样的列表宽度下图片大了一圈，更容易认出款式。
+ * 填充方式见下方合并规则（contain，不裁切）。
+ */
+.item-thumb {
+  width: 80px; height: 80px; flex: 0 0 80px;
+  background: var(--accent-bg); border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; font-size: 11px; color: var(--ink-mute);
+}
+/*
+ * 缩略图用 contain（完整显示），**不要用 cover（裁切）**。
+ *
+ * 这是踩过的一次判断错误：我一开始改成 cover，想让卡片看着更饱满，
+ * 结果家具是大件商品，裁切后沙发只剩一条色带、茶几被切掉一半，
+ * 销售反而更认不出货了——正好违背加图的初衷。
+ *
+ * 对比：
+ *   contain  完整显示，四周可能留白 → 看得出是什么家具
+ *   cover    填满卡片，但会裁掉边缘 → 看着整齐，但可能裁掉关键部位
+ * 对"确认选对货"这个用途，**看得出全貌比排版整齐重要**。
+ */
+.item-thumb img,
+.oitem-thumb img,
+.pick-card-img img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.item-main { flex: 1; min-width: 0; }
+.item-name {
+  font-size: 16px; font-weight: 600; margin-bottom: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.item-sub { font-size: 13px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * 规格单独一行、最多两行。
+ *
+ * 原来规格是拼在品类后面用一行显示的，结果被截成
+ * 「客厅 · 沙发 · 尺寸 2200×…」——型号尺寸正是销售最需要看的部分，
+ * 截在那里等于没有。给它整行两行，信息才真的能看到。
+ */
+.item-specs {
+  font-size: 12px; color: var(--ink-mute); margin-top: 3px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.item-price { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.item-right { text-align: right; flex: 0 0 auto; }
+/* 未同步标记：红线要求"只在本机、未上行的单"必须被用户看得见 */
+.unsynced-badge {
+  margin-top: 4px; display: inline-block;
+  font-size: 11px; font-weight: 600;
+  color: #8a5a00; background: #fdf1dc;
+  border: 1px solid #f0dcb4; border-radius: 6px;
+  padding: 1px 6px; white-space: nowrap;
+}
+
+.pickbox {
+  width: 26px; height: 26px; flex: 0 0 26px;
+  border: 2px solid var(--line); border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; color: transparent; background: var(--paper);
+}
+.item.is-on .pickbox { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.empty { text-align: center; padding: 48px 16px; color: var(--ink-soft); }
+.empty p { margin-bottom: 20px; font-size: 16px; }
+
+/* ---------------- 表单 ---------------- */
+.form { display: flex; flex-direction: column; gap: 14px; }
+.form label, .field { display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: var(--ink-soft); }
+.field-label { font-size: 15px; color: var(--ink-soft); }
+.req { color: var(--danger); }
+
+input, textarea, select {
+  min-height: 46px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink);
+  font-size: 16px; font-family: inherit; width: 100%;
+}
+textarea { min-height: 68px; resize: vertical; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.switch { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 15px; color: var(--ink-soft); }
+.switch input { width: 22px; height: 22px; min-height: 0; }
+
+.hint { font-size: 13px; color: var(--ink-mute); line-height: 1.6; }
+.save-msg { margin-top: 12px; color: var(--ok); font-size: 15px; }
+
+/* ---------------- 拍照 / Logo ---------------- */
+.photo-row, .logo-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.photo-actions { display: flex; flex-direction: column; gap: 8px; }
+.photo-preview {
+  width: 120px; height: 90px; object-fit: contain;
+  background: var(--accent-bg); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.logo-preview { max-height: 56px; max-width: 160px; object-fit: contain; }
+
+/* ---------------- 底部操作条 ---------------- */
+.actionbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+  display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--paper); border-top: 1px solid var(--line);
+}
+.actionbar .btn { flex: 1; }
+
+/* ---------------- 编辑弹层 ---------------- */
+.sheet {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(43, 35, 32, .45);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet-panel {
+  width: 100%; max-width: 640px; max-height: 92vh; overflow-y: auto;
+  background: var(--bg); border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+}
+.sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 17px; font-weight: 700; margin-bottom: 14px;
+}
+.sheet-actions { display: flex; gap: 10px; margin-top: 6px; }
+.sheet-actions .btn-primary { flex: 1; }
+
+/* ---------------- 提示 ---------------- */
+/*
+ * 提示条
+ *
+ * ⚠️ `pointer-events: none` 是**必须的**，不是可选优化。
+ *
+ * 它是 position:fixed 且浮在底部 96px 处，会盖住下面一整条区域的按钮
+ * （实测：开单页的「加一个产品」正好在那个位置）。
+ * 没有这一行时，提示条显示期间用户点那个按钮**没反应**，
+ * 看起来像"按钮坏了"——实测踩过，而且很难查，因为点的是提示条本身。
+ *
+ * 提示条只用来显示信息，不需要接收点击，所以整条都不参与命中测试。
+ */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  z-index: 60; max-width: 88vw;
+  background: rgba(43, 35, 32, .94); color: #fff;
+  padding: 12px 18px; border-radius: 10px; font-size: 15px;
+  text-align: center; line-height: 1.5;
+  pointer-events: none;
+}
+/* 万一将来提示条里放了链接，让它仍可点击 */
+.toast a, .toast button { pointer-events: auto; }
+.toast.is-error { background: var(--danger); }
+
+.result {
+  margin-top: 14px; padding: 14px; border-radius: var(--radius);
+  background: var(--paper); border: 1px solid var(--line); font-size: 15px;
+}
+.result a { color: var(--accent); font-weight: 600; }
+
+/* ---------------- 账号管理 ---------------- */
+
+/* 状态标签：管理员 / 已停用 / 待改密 */
+.tag {
+  display: inline-block; font-size: 11px; line-height: 1.6;
+  padding: 0 7px; border-radius: 9px; margin-left: 6px;
+  background: var(--accent-bg); color: var(--accent);
+  vertical-align: middle; white-space: nowrap;
+}
+.tag-admin { background: #ede4f5; color: #6b4b8a; }
+.tag-off { background: #f0ece8; color: var(--ink-mute); }
+.tag-warn { background: #fbf0d9; color: #8a6a1f; }
+
+.item-right { display: flex; align-items: center; flex: 0 0 auto; }
+.chev { font-size: 22px; color: var(--ink-mute); line-height: 1; padding: 0 2px; }
+
+/* 勾选行：整行可点，符合"大按钮少思考" */
+.check-line {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 2px; font-size: 14px; line-height: 1.5;
+  cursor: pointer; color: var(--ink);
+}
+.check-line input[type="checkbox"] {
+  width: 22px; height: 22px; flex: 0 0 22px; margin: 0;
+  accent-color: var(--accent);
+}
+.check-line span { flex: 1; }
+
+/*
+ * 一次性密码展示框。
+ *
+ * 样式刻意做得显眼（粗体大字 + 警示色边框）：
+ * 这串密码**关闭后无法再查**，管理员需要当场抄下来或念给对方。
+ * 做得不显眼的话，管理员会顺手关掉，然后对方就登不进来了。
+ */
+.once-box {
+  margin-top: 14px; padding: 14px;
+  border: 2px solid var(--warn); border-radius: var(--radius);
+  background: #fffbf2;
+}
+.once-title { font-size: 14px; font-weight: 700; color: #8a6a1f; margin-bottom: 8px; }
+.once-pw {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 24px; font-weight: 700; letter-spacing: 2px;
+  color: var(--ink); text-align: center;
+  padding: 10px; margin-bottom: 10px;
+  background: var(--paper); border: 1px dashed var(--line); border-radius: 8px;
+  user-select: all;      /* 点一下就能全选，方便复制 */
+  word-break: break-all;
+}
+.once-box .btn { width: 100%; }
+
+@media (min-width: 720px) {
+  .list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+}

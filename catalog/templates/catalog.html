@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>产品画册</title>
+<style>
+  /* A4 = 210mm × 297mm */
+  @page { size: A4; margin: 0; }
+
+  :root {
+    --ink:      #2b2320;
+    --ink-soft: #6d625b;
+    --ink-mute: #9a908a;
+    --line:     #e3dcd3;
+    --paper:    #ffffff;
+    --accent:   #8a5a3b;
+    --accent-bg:#f7f2ec;
+  }
+
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  html, body { margin: 0; padding: 0; background: #fff; }
+
+  body {
+    /* 中文优先字体栈：思源/微软雅黑/苹方，避免 pdfkit 那种无 CJK 字形的问题 */
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+                 "Source Han Sans SC", "Noto Sans CJK SC", "SimSun", sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.55;
+  }
+
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    padding: 16mm 15mm;
+    background: var(--paper);
+    position: relative;
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---------- 封面 ---------- */
+  .cover { justify-content: center; align-items: flex-start; padding: 0 22mm; }
+
+  .cover-rule {
+    width: 54mm; height: 2.6pt; background: var(--accent);
+    margin-bottom: 9mm;
+  }
+  .cover-company {
+    font-size: 30pt; font-weight: 700; letter-spacing: 2.5pt;
+    line-height: 1.25; margin: 0 0 6mm;
+  }
+  .cover-tagline {
+    font-size: 12.5pt; color: var(--ink-soft); letter-spacing: 1.2pt;
+    margin: 0 0 14mm; font-weight: 400;
+  }
+  .cover-meta {
+    border-top: 0.6pt solid var(--line);
+    padding-top: 5mm;
+    font-size: 9.5pt; color: var(--ink-mute); letter-spacing: .6pt;
+    width: 100%;
+  }
+  .cover-meta strong { color: var(--ink-soft); font-weight: 500; }
+  .cover-badge {
+    position: absolute; top: 18mm; right: 22mm;
+    font-size: 8.5pt; letter-spacing: 1.6pt; color: var(--accent);
+    border: 0.8pt solid var(--accent); border-radius: 2pt;
+    padding: 1.4mm 3.2mm;
+  }
+
+  /* ---------- 页眉 ---------- */
+  .head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1.4pt solid var(--ink); padding-bottom: 3mm; margin-bottom: 7mm;
+  }
+  .head h1 { font-size: 15pt; margin: 0; font-weight: 700; letter-spacing: 1pt; }
+  .head .head-note { font-size: 8.5pt; color: var(--ink-mute); letter-spacing: .5pt; }
+
+  /* ---------- 产品网格 ---------- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7mm 6mm; }
+
+  .card {
+    border: 0.6pt solid var(--line);
+    border-radius: 2.5pt;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    page-break-inside: avoid;
+  }
+
+  .card-img {
+    width: 100%; height: 42mm;
+    background: var(--accent-bg);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .card-img img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+  .card-body { padding: 3.4mm 3.8mm 3.8mm; display: flex; flex-direction: column; flex: 1; }
+
+  .card-cat {
+    font-size: 7.5pt; color: var(--accent); letter-spacing: .8pt;
+    margin-bottom: 1.4mm;
+  }
+  .card-name {
+    font-size: 11.5pt; font-weight: 700; line-height: 1.35;
+    margin: 0 0 2.2mm;
+  }
+  .card-spec {
+    font-size: 8.6pt; color: var(--ink-soft); line-height: 1.62;
+    margin: 0 0 2.4mm; flex: 1;
+  }
+  .card-highlights { margin: 0 0 2.8mm; }
+  .tag {
+    display: inline-block; font-size: 7.6pt; color: var(--ink-soft);
+    background: var(--accent-bg); border-radius: 1.6pt;
+    padding: .7mm 1.8mm; margin: 0 1.4mm 1.2mm 0;
+  }
+
+  .card-foot {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    border-top: 0.6pt solid var(--line); padding-top: 2.4mm; margin-top: auto;
+  }
+  .price { font-size: 14pt; font-weight: 700; color: var(--accent); line-height: 1; }
+  .price small { font-size: 8.5pt; font-weight: 400; color: var(--ink-mute); margin-left: .8mm; }
+  .stock { font-size: 8pt; color: var(--ink-soft); }
+  .stock::before {
+    content: ""; display: inline-block; width: 1.6mm; height: 1.6mm;
+    border-radius: 50%; background: #6f9e6a; margin-right: 1.2mm;
+  }
+  .stock.is-custom::before { background: #d0a24c; }
+
+  /* ---------- 页脚 ---------- */
+  .foot {
+    margin-top: auto; padding-top: 4mm;
+    border-top: 0.6pt solid var(--line);
+    display: flex; justify-content: space-between;
+    font-size: 8pt; color: var(--ink-mute); letter-spacing: .4pt;
+  }
+</style>
+</head>
+<body>
+
+<!--
+  封面与目录页由 generate-with-puppeteer.mjs 按批次生成后注入此处。
+  目录页必须显式分页：每页固定放 PER_PAGE 个产品，并由脚本实测断言不超 A4 高度。
+  故此处不保留任何写死的产品网格，避免与实际分页逻辑产生两份真相。
+-->
+<!--__COVER__-->
+
+</body>
+</html>

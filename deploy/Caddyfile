@@ -1,0 +1,67 @@
+# Caddy 配置 —— HTTPS 反代到应用
+#
+# 为什么必须有它：没有 HTTPS 时登录密码是明文过网的，
+# 密码认证等于白做（主文档技术债务 #26）。
+#
+# Caddy 会自动处理证书，两种情形都不用你手工配：
+#
+#   A) SITE_ADDRESS 是域名（如 orders.example.com）
+#      → 自动向 Let's Encrypt 申请并续期可信证书。要求域名已解析到本机、
+#        且 80/443 端口能从公网访问。
+#
+#   B) SITE_ADDRESS 是 IP 或 localhost（如 192.168.1.10）
+#      → 自动生成**内部 CA 证书**。浏览器首次访问会提示不受信任，
+#        需要点一次"继续"（或在设备上安装 Caddy 的根证书，见 deploy/README.md）。
+#        内网部署选这个。
+
+{
+	# 内网部署：用内部 CA 签发证书（不需要公网域名）
+	# 有公网域名时可删掉这一段，让 Caddy 走 ACME 自动签发
+	local_certs
+
+	# 关掉管理端点，减少暴露面
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# 反向代理到应用
+	reverse_proxy app:8080 {
+		# 同步走的是长连接拉取，放宽超时，否则大批量同步会被切断
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+
+	# 访问日志（排障用；Caddy 会写到容器 stdout，用 docker compose logs caddy 看）
+	log {
+		output stdout
+		format console
+	}
+
+	# 基础安全响应头
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		# 本应用只在 HTTPS 下用；开启 HSTS 让浏览器记住不要退回 HTTP
+		Strict-Transport-Security "max-age=31536000"
+		# 明确禁止被嵌入，避免点击劫持
+		Content-Security-Policy "frame-ancestors 'none'"
+	}
+}
+
+# ---------------------------------------------------------------------
+# HTTP -> HTTPS 跳转（内网/非标准端口场景）
+#
+# 为什么单独写这一段：当 HTTPS 映射到非 443 端口（例如 8443）时，
+# Caddy 的自动跳转会把请求送到 https://<主机>/（即 443 端口），而那里没有服务，
+# 用户会看到"无法连接"。这里显式带上 HTTPS_PORT，跳转才落在正确端口。
+#
+# 用 443 标准端口部署时把这段删掉即可（Caddy 的自动跳转就够了）。
+# ---------------------------------------------------------------------
+http://{$SITE_ADDRESS} {
+	redir https://{host}:{$HTTPS_PORT}{uri} permanent
+}

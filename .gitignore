@@ -1,0 +1,54 @@
+# 依赖与构建产物
+node_modules/
+*.tsbuildinfo
+
+# 本地配置与密钥（含 CouchDB 口令，绝不入库）
+.env
+.env.*
+!.env.example
+
+# 运行期数据（产品、图片、导出、截图、账号）
+# 注意：首次运行会自动重建这些，不入库是有意的——
+#      别人的产品数据不该跟着代码走。
+app/data/
+
+# 可再生的第三方浏览器构建（用 app/tools/vendor-pouchdb.mjs 重新生成）
+app/public/vendor/
+
+# 画册验证工程的产物
+catalog/out/
+
+# 协议层验证工程：pouchdb-server 运行时留下的数据库文件（不是源码）
+sync/pouch__all_dbs__/
+sync/pouch__*
+
+# HTTPS 根证书：Caddy 首次启动时自动生成，每台机器都不一样。
+# 需要它的人按 deploy/README.md 的命令自己从容器里导出。
+deploy/caddy-root.crt
+*.crt
+*.pem
+*.key
+
+# 已安装的安装包缓存
+_couchdb-installer/
+
+# 可再生缓存（体积大）
+.npm-cache/
+.puppeteer-cache/
+
+# Puppeteer 运行时 profile
+catalog/out/.chrome-profile/
+.chrome-profile-*
+
+# 编辑器与系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+~$*
+
+# 沙箱权限修复记录 / 本机专用脚本
+_acl-recovery/
+
+# 数据文件损坏时的备份（见 server/sales.mjs readJson 的说明）
+*.corrupt-*
