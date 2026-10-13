@@ -18,7 +18,7 @@ import {
   getSettings, saveSettings,
 } from './store.mjs';
 import {
-  DATA_ROOT, DATA_DIR, ASSET_DIR, EXPORT_DIR, ensureDirsSync,
+  DATA_ROOT, DATA_DIR, ASSET_DIR, EXPORT_DIR, TMP_DIR, ensureDirsSync,
 } from './datadir.mjs';
 // 注意：orders.mjs 仍然存在，但服务端已不再直接读写它——
 // 订单的权威存储是 CouchDB，客户端通过 /api/sync/orders/* 同步。
@@ -480,13 +480,15 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/catalog/pdf' && req.method === 'POST') {
     const body = await readBody(req);
-    const { renderCatalogHtml, renderCatalogPdf, assertLayout } = await import('./render-catalog.mjs');
+    const {
+      renderCatalogHtml, renderCatalogPdf, assertLayout,
+    } = await import('./render-catalog.mjs');
 
     /**
      * 浏览器是**可选**的：便携包里带不带它差 279 MB。
      * 所以这里不假设它一定在，而是探测；没有就明确告诉用户改用哪条路。
      */
-    const { loadPuppeteer } = await import('./browser.mjs');
+    const { loadPuppeteer, printToPdfViaCli } = await import('./browser.mjs');
     const bp = await loadPuppeteer();
     if (!bp.ok) {
       return send(res, 501, {
@@ -496,6 +498,7 @@ async function handleApi(req, res, url) {
       });
     }
     const { puppeteer, launchOptions } = bp;
+    const viaCli = bp.source === 'cli';
 
     const products = await listProducts();
     if (!products.length) return fail(res, 400, '没有产品，无法生成画册');
@@ -507,28 +510,54 @@ async function handleApi(req, res, url) {
     });
 
     try {
-      // 先断言分页不溢出，避免产出被静默裁掉内容的画册
-      const layout = await assertLayout(html, puppeteer, { launchOptions });
-      if (!layout.ok) {
-        const bad = layout.pages.filter((x) => x.overflowing);
-        return send(res, 422, {
-          error: `分页溢出：${bad.length} 页超过 A4 高度，打印会丢失内容`,
-          hint: '请减少每页产品数，或缩短规格文字',
-          pages: layout.pages,
-        });
+      /**
+       * 分页溢出断言。
+       *
+       * 只有 puppeteer 那条路能做（它能在页面里逐页量高度）。
+       * 命令行出 PDF 拿不到这个能力——但排版本来就靠固定 PER_PAGE
+       * 保证不溢出，这条断言是第二道防线，不是唯一防线。
+       * 少一道防线要**说出来**，不能假装做了。
+       */
+      let layout = null;
+      if (!viaCli) {
+        layout = await assertLayout(html, puppeteer, { launchOptions });
+        if (!layout.ok) {
+          const bad = layout.pages.filter((x) => x.overflowing);
+          return send(res, 422, {
+            error: `分页溢出：${bad.length} 页超过 A4 高度，打印会丢失内容`,
+            hint: '请减少每页产品数，或缩短规格文字',
+            pages: layout.pages,
+          });
+        }
       }
 
       await fs.mkdir(EXPORT_DIR, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const outPath = path.join(EXPORT_DIR, `catalog-${stamp}.pdf`);
-      const result = await renderCatalogPdf(html, puppeteer, outPath, { launchOptions });
+
+      let result;
+      if (viaCli) {
+        // 写 HTML 到临时目录，交给浏览器命令行出 PDF
+        const htmlPath = path.join(TMP_DIR, '.catalog-cli.html');
+        await fs.mkdir(TMP_DIR, { recursive: true });
+        await fs.writeFile(htmlPath, html, 'utf-8');
+        await printToPdfViaCli(bp.executable, htmlPath, outPath);
+        const size = (await fs.stat(outPath)).size;
+        result = { pdfPath: outPath, sizeKB: Math.round(size / 1024) };
+      } else {
+        result = await renderCatalogPdf(html, puppeteer, outPath, { launchOptions });
+      }
+
       const fileName = path.basename(result.pdfPath);
       return send(res, 200, {
         fileName,
         downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
         sizeKB: result.sizeKB,
-        pages: layout.pages.length,
-        layout: layout.pages,
+        pages: layout?.pages.length ?? null,
+        layout: layout?.pages ?? null,
+        // 如实说明这次没有做逐页溢出断言，别让人以为检查过了
+        layoutChecked: !viaCli,
+        driver: bp.source,
       });
     } catch (err) {
       /**
@@ -538,8 +567,8 @@ async function handleApi(req, res, url) {
        */
       return send(res, 500, {
         error: `服务端生成失败：${err.message}`,
-        hint: '可以改用「打印为 PDF」——它不依赖服务端，手机也能用。'
-            + `（当前用的浏览器：${launchOptions.executablePath ?? '由 puppeteer 决定'}）`,
+        hint: '可以改用「打印为 PDF」——它不依赖服务端，手机也能用，效果相同。'
+            + `（当前用的浏览器：${bp.executable ?? launchOptions.executablePath ?? '由 puppeteer 决定'}）`,
         fallback: 'print',
       });
     }

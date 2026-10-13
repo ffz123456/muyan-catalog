@@ -18,13 +18,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+// 数据目录统一来源：这样便携版（FS_DATA_ROOT）跑 seed 也会写对地方。
+// 之前这里硬编码 app/data，导致打包后执行 seed 写到了别处、服务端看不到。
+import { DATA_DIR, ASSET_DIR } from '../server/datadir.mjs';
 
 const HERE = import.meta.dirname;
 const APP_DIR = path.join(HERE, '..');
 const CATALOG_DIR = path.join(APP_DIR, '..', 'catalog');
 
-const ASSET_DIR = path.join(APP_DIR, 'data', 'assets');
-const DATA_DIR = path.join(APP_DIR, 'data');
 /** 随镜像分发的素材位置（不受数据卷影响） */
 const BUILTIN_ASSETS = path.join(APP_DIR, 'assets', 'sample-assets');
 /** 本机开发时可能在这里 */
