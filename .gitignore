@@ -42,6 +42,9 @@ deploy/初始密码.txt
 # 打包产物（由 tools/build-solo.mjs 生成，可随时重建）
 app/dist/
 
+# 临时提交信息文件（含特殊字符时用它避免 shell 转义问题）
+.git-commit-msg.txt
+
 # Chromium 在某些机器上会往工作目录写这个（输入法相关），不是我们的东西
 debug.log
 
