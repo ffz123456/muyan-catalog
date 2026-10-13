@@ -30,6 +30,30 @@ async function main() {
   const products = await listProducts();
   s.group('【0】前置数据');
   s.check('有可用的产品数据', products.length > 0, `${products.length} 款`);
+
+  /**
+   * ⚠️ 产品不足时**明确说清怎么办，然后停**。
+   *
+   * 原来这里直接往下走，第二行 `p2.price` 就抛
+   * `Cannot read properties of undefined (reading 'name')`——
+   * 一句和"没导入产品"毫无关系的报错。
+   * 新克隆的仓库跑这个套件必然踩到（data/ 是 gitignore 的，克隆出来是空的），
+   * 而新人看到那种堆栈只会以为"这项目坏了"。
+   *
+   * 出单至少要用到两款产品（一款测目录价、一款测让价），少于两款就没法测。
+   */
+  if (products.length < 2) {
+    s.info('');
+    s.info('这个套件至少需要 2 款产品，当前只有 ' + products.length + ' 款。');
+    s.info('请先导入示例数据，再重跑：');
+    s.info('');
+    s.info('    node tools/seed-sample-data.mjs');
+    s.info('');
+    const { failed } = s.summary();
+    process.exitCode = failed.length ? 1 : 0;
+    return;
+  }
+
   const [p1, p2] = products;
   s.info(`用 ${p1.name}（目录价 ${p1.price}）和 ${p2.name}（目录价 ${p2.price}）测试`);
 

@@ -17,9 +17,11 @@
  * 运行（需先启动服务端）：node tools/verify-auth.mjs
  * 需要初始密码：从服务端启动日志里取，通过环境变量传入。
  */
-import { createSuite } from './assert-lib.mjs';
+import { createSuite, detectSyncMode } from './assert-lib.mjs';
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:8080';
+/** 这个中心用哪套同步（couch / hub），决定第 5 组测哪个端点 */
+const syncMode = await detectSyncMode(BASE);
 const PW_ADMIN = process.env.PW_ADMIN;
 const PW_ALICE = process.env.PW_ALICE;
 const PW_BOB = process.env.PW_BOB;
@@ -105,8 +107,21 @@ async function main() {
   s.group('【5】未登录不能访问同步端点');
   const savedCookie = cookie;
   cookie = '';
-  const anonSync = await call('/api/sync/orders/_changes?since=0');
-  s.check('未登录同步被拒', anonSync.status === 401, `HTTP ${anonSync.status}`);
+  /**
+   * 同步端点分两套（见主文档 §3.3）：
+   *   couch → /api/sync/*
+   *   hub   → /api/hub/*     ← 默认，不需要装数据库
+   * 两条都必须挡住未登录，但**只能测当前启用的那套**——
+   * 另一套会返回 503（明确表示"这个中心没配数据库"），那不是安全问题。
+   */
+  if (syncMode === 'hub') {
+    const anonHub = await call('/api/hub/pull', { method: 'POST', body: { since: 0 } });
+    s.check('未登录同步被拒（自带存储）', anonHub.status === 401, `HTTP ${anonHub.status}`);
+    s.info('（本中心用自带存储，CouchDB 专属的 /api/sync/* 不测）');
+  } else {
+    const anonSync = await call('/api/sync/orders/_changes?since=0');
+    s.check('未登录同步被拒', anonSync.status === 401, `HTTP ${anonSync.status}`);
+  }
   const anonOrders = await call('/api/orders');
   s.check('旧的本地订单端点已移除', anonOrders.status === 404, `HTTP ${anonOrders.status}`);
   cookie = savedCookie;

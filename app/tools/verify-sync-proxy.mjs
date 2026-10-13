@@ -15,10 +15,23 @@
  *
  * 运行（需先启动服务端）：node tools/verify-sync-proxy.mjs
  */
-import { createSuite } from './assert-lib.mjs';
+import { createSuite, detectSyncMode } from './assert-lib.mjs';
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:8080';
 const DB = 'orders';
+
+/**
+ * 这个套件测的是 **CouchDB 复制协议代理**（/api/sync/*）。
+ *
+ * 但项目有两套同步实现（见主文档 §3.3），而**默认是自带存储那套**
+ * （不需要装数据库，新克隆的仓库跑起来就是它）。
+ * 自带存储模式下 /api/sync/* 一律返回 503——
+ * 那不是功能坏了，是这个套件**不适用于当前形态**。
+ *
+ * 所以先探测，不适用就明确跳过并说明该跑哪个套件，
+ * 而不是甩出一堆 503 让人以为权限层塌了。
+ */
+const syncMode = await detectSyncMode(BASE);
 
 const s = createSuite('第 4 步 · 同步代理验证');
 
@@ -72,6 +85,23 @@ async function changesViaProxy(since = 0) {
 }
 
 async function main() {
+  /**
+   * 自带存储模式下这个套件不适用——**明确跳过**，别报一堆假的 503 失败。
+   */
+  if (syncMode === 'hub') {
+    s.group('【0】适用性');
+    s.info('这个中心用的是「自带存储」同步（/api/hub/*），');
+    s.info('而本套件测的是 CouchDB 复制协议代理（/api/sync/*），不适用。');
+    s.info('');
+    s.info('要测当前形态下的同步与隔离，请跑：');
+    s.info('    node tools/verify-hub-e2e.mjs');
+    s.info('');
+    s.info('要测 CouchDB 那条路，需要给服务端配 COUCHDB_URL 再跑本套件。');
+    s.check('（跳过）本套件需要在 CouchDB 模式下运行', true, '已按实际形态跳过');
+    s.summary();
+    return;
+  }
+
   /* ---------- 1. 未登录 ---------- */
   s.group('【1】未登录时同步被拒');
   cookie = '';

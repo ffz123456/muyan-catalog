@@ -16,9 +16,14 @@
  *
  * 运行（需先启动服务端）：PW_ADMIN=xxx node tools/verify-accounts.mjs
  */
-import { createSuite } from './assert-lib.mjs';
+import { createSuite, detectSyncMode } from './assert-lib.mjs';
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:8080';
+/**
+ * 这个中心用哪套同步（couch / hub）。
+ * 决定第 4 组怎么读「新账号能看到哪些文档」——两套的返回形状不同。
+ */
+const syncMode = await detectSyncMode(BASE);
 const PW_ADMIN = process.env.PW_ADMIN;
 
 const s = createSuite('账号管理验证');
@@ -172,8 +177,24 @@ async function main() {
   s.check('登录信息带出需改密标记', newLogin.body?.sales?.must_change_password === true);
   const newCookie = newLogin.cookie;
 
-  const syncAsNew = await call('/api/sync/orders/_changes?since=0', { as: newCookie });
-  s.check('新账号可访问同步端点', syncAsNew.status === 200, `HTTP ${syncAsNew.status}`);
+  /**
+   * 新账号能访问同步端点，且看不到任何既有订单。
+   *
+   * 同步分两套（见主文档 §3.3）：couch 走 /api/sync/*，hub 走 /api/hub/*。
+   * **只测当前启用的那套**——另一套会返回 503（这个中心没配数据库），
+   * 那不是权限问题。两套的返回形状不同，所以取 id 的方式也不同。
+   */
+  let newDocIds;
+  if (syncMode === 'hub') {
+    const r = await call('/api/hub/pull', { method: 'POST', as: newCookie, body: { since: 0 } });
+    s.check('新账号可访问同步端点（自带存储）', r.status === 200, `HTTP ${r.status}`);
+    newDocIds = (r.body?.changes ?? []).map((c) => c.id);
+  } else {
+    const r = await call('/api/sync/orders/_changes?since=0', { as: newCookie });
+    s.check('新账号可访问同步端点', r.status === 200, `HTTP ${r.status}`);
+    newDocIds = (r.body?.results ?? []).map((x) => x.id);
+  }
+
   /**
    * 只看**订单**类文档。
    *
@@ -182,7 +203,6 @@ async function main() {
    * 一开始我把断言写成"一条都看不到"，结果被一个遗留的 product:p1 判失败——
    * 是断言错了，不是权限漏了。
    */
-  const newDocIds = (syncAsNew.body?.results ?? []).map((r) => r.id);
   const newOrders = newDocIds.filter((id) => id.startsWith('order:') || id.startsWith('orderrev:'));
   s.check('新账号看不到任何既有订单', newOrders.length === 0,
     `订单 ${newOrders.length} 条（其他共享文档 ${newDocIds.length - newOrders.length} 条）`);

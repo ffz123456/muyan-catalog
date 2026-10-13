@@ -47,3 +47,33 @@ export function createSuite(title) {
   };
   return out;
 }
+
+/**
+ * 查这个中心用的是哪套同步。
+ *
+ * 为什么要这个：项目有两套同步实现（见主文档 §3.3）——
+ *   'couch'  CouchDB 复制协议，端点在 /api/sync/*
+ *   'hub'    中心自带存储，端点在 /api/hub/*  （默认，不需要装数据库）
+ *
+ * 而 `/api/sync/*` 在 hub 模式下会返回 **503**（明确告知"这个中心没配数据库"）。
+ * 于是那些"测 CouchDB 那条路"的断言在 hub 模式下会以 503 失败——
+ * 那不是功能坏了，是**测试没跟上架构变化**：
+ * 新克隆的仓库默认就跑 hub 模式，而套件还假设有 CouchDB。
+ *
+ * 所以测 CouchDB 专属行为的套件要先用它判断，不适用就**明确跳过**，
+ * 而不是报一个看起来像故障的失败。
+ *
+ * @returns {Promise<'couch'|'hub'|'unknown'>}
+ */
+export async function detectSyncMode(baseUrl) {
+  try {
+    const r = await fetch(new URL('/api/capabilities', baseUrl), {
+      headers: { Accept: 'application/json' },
+    });
+    if (!r.ok) return 'unknown';
+    const j = await r.json();
+    return j?.syncMode === 'hub' ? 'hub' : j?.syncMode === 'couch' ? 'couch' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
