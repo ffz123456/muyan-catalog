@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title 停止家具开单工具
+title 停止木言
 
 rem 停止服务。数据不会丢（都在 Docker 卷里）。
 

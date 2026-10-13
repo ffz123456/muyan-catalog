@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title 家具经销商 · 电子画册与开单工具
+title 木言 · 开单画册
 
 rem 双击这个文件即可启动。
 rem

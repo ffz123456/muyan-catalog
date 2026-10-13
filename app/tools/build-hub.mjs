@@ -2,9 +2,9 @@
  * 打包「团队版中心」—— 一个双击就能用的文件夹
  *
  * 产物结构：
- *   windows/dist/团队版中心/
+ *   windows/dist/木言/
  *   ├── 启动.cmd                    ← 用户双击这个
- *   ├── 家具开单-服务端.exe          ← 独立可执行（不依赖装 Node）
+ *   ├── 木言-服务端.exe          ← 独立可执行（不依赖装 Node）
  *   ├── README.txt                  ← 给不会用电脑的人看
  *   ├── app/
  *   │   ├── server/  public/  shared/  assets/
@@ -29,7 +29,7 @@ import { execFileSync } from 'node:child_process';
 const APP = path.join(import.meta.dirname, '..');
 const ROOT = path.join(APP, '..');
 const HUB = path.join(ROOT, 'windows', 'hub');
-const DIST = path.join(ROOT, 'windows', 'dist', '团队版中心');
+const DIST = path.join(ROOT, 'windows', 'dist', '木言');
 
 const WITH_BROWSER = process.argv.includes('--with-browser');
 const NODE_EXE = process.env.BUILD_NODE_EXE || 'C:\\nodejs\\node.exe';
@@ -66,7 +66,7 @@ async function buildExe() {
   step('生成 SEA blob…');
   execFileSync(NODE_EXE, ['--experimental-sea-config', 'sea-config.json'], { cwd: work, stdio: 'pipe' });
 
-  const exe = path.join(DIST, '家具开单-服务端.exe');
+  const exe = path.join(DIST, '木言-服务端.exe');
   await fsp.copyFile(NODE_EXE, exe);
 
   step('注入到 exe…');
@@ -185,14 +185,14 @@ function dirSize(d) {
 async function writeEntryPoints(hasBrowser) {
   const cmd = `@echo off
 chcp 65001 >nul
-title 家具开单 · 团队版中心
+title 木言 · 团队版中心
 cd /d "%~dp0"
 
 echo.
 echo   正在启动，请稍等...
 echo.
 
-"%~dp0家具开单-服务端.exe"
+"%~dp0木言-服务端.exe"
 
 echo.
 echo   程序已停止运行。
@@ -202,7 +202,7 @@ pause
 `;
   await fsp.writeFile(path.join(DIST, '启动.cmd'), cmd.replace(/\n/g, '\r\n'), 'utf-8');
 
-  const readme = `家具开单 · 团队版中心
+  const readme = `木言 · 开单画册
 ========================================
 
 怎么用

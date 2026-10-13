@@ -1,7 +1,7 @@
 /**
  * 单文件版验证
  *
- * 目标：确认 `dist/家具开单-单机版.html` **真的能作为单个文件在无服务器环境下工作**。
+ * 目标：确认 `dist/木言-单机版.html` **真的能作为单个文件在无服务器环境下工作**。
  *
  * 为什么必须实测而不是"打包成功就算完"：
  *   自己写的打包器是靠正则改名拼接的，出错方式是**静默的**——
@@ -23,7 +23,7 @@ import { launchBrowser } from './browser.mjs';
 import { createSuite } from './assert-lib.mjs';
 
 const APP = path.join(import.meta.dirname, '..');
-const BUNDLE = path.join(APP, 'dist', '家具开单-单机版.html');
+const BUNDLE = path.join(APP, 'dist', '木言-单机版.html');
 
 const s = createSuite('单文件版验证');
 

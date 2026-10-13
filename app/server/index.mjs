@@ -743,7 +743,7 @@ async function bootstrap() {
   }
 
   console.log('');
-  console.log('  家具经销商 · 电子画册与开单工具');
+  console.log('  木言 · 开单画册');
   console.log('  ────────────────────────────────────────');
   console.log(`  监听地址：  http://${HOST}:${PORT}`);
   console.log(`  产品：${products.length} 款    销售账号：${sales.length} 个`);

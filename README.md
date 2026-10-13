@@ -1,19 +1,20 @@
-# 家具经销商 · 电子画册与开单工具
+# 木言 · 开单画册
 
 [![验证](https://github.com/OWNER/REPO/actions/workflows/verify.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/verify.yml)
 
 > ⬆️ 发布到 GitHub 后，把 `OWNER/REPO` 换成你的仓库路径，徽章就会亮起来。
 
-**给一家家具经销商自己部署的开单工具。** 一条命令起服务，销售用手机浏览器干活，零安装。
+**给一家家具经销商用的开单工具。** 销售在手机上选货出画册、开单，
+**互相看不到对方的单**。零安装——销售只拿到一个网址，或一个文件。
 
 **不做 ERP。** 只做两件事：
 
-1. **产品管理 + 电子画册生成** —— 拍照录入，一键产出 PDF 画册发给客户
-2. **出单记录** —— 销售出单，**互相看不到对方的单**
+1. **产品管理 + 电子画册** —— 拍照录入，一键产出带图的 PDF 画册发给客户
+2. **出单记录** —— 销售出单，**互相看不到对方的单**，老板看全部
 
 ## 它不是什么
 
-- **不是多租户 SaaS** —— 一家公司自己部署一套，只有自己人用
+- **不是多租户 SaaS** —— 一家公司自己用一套，只有自己人用
 - **不是 CRM** —— 系统不管理客户；客户只是订单上的文本，是销售自己的资源
 - **不是渠道分销平台** —— "厂家"只是货源标签，不是系统使用者
 
@@ -25,6 +26,62 @@
 一键生成带图的 PDF 画册发给客户 → 客户有意向就直接开单。
 **单子只存在这个销售自己名下**，别的销售看不到，成交价也不会外泄。
 
+## 三种用法，按人数选
+
+| | **单机版** | **团队版中心** | **Docker 版** |
+|---|---|---|---|
+| 适合 | 一个人用 | 几个人共享订单 | 有服务器 / 要公网 |
+| 交付物 | 一个 `木言-单机版.html`（278 KB） | 一个文件夹（368 MB） | `docker compose` |
+| 要装什么 | **什么都不用** | **什么都不用** | Docker |
+| 数据在哪 | 手机浏览器里 | 中心电脑的 `data/` | 容器卷 |
+| 多人共享 | ✗ | ✅ | ✅ |
+| 服务端出画册 PDF | ✗（用「打印为 PDF」） | ✅ | ⚠️ 有中文缺陷，见下 |
+
+### ① 单机版 —— 一个人用，最简单
+
+```bash
+cd app && node tools/build-solo.mjs      # 产出 dist/木言-单机版.html
+```
+
+把那个 HTML 文件发到手机上（微信、网盘都行），用浏览器打开就能用。
+**不需要服务器、不需要网络、不装任何 App。**
+
+> ⚠️ 数据存在手机浏览器里。清理浏览器数据 / 换手机会丢，
+> 所以「设置」页有**导出备份**——这是必需项，不是可选功能。
+> 详见 [`app/docs/手机单机版使用说明.md`](app/docs/手机单机版使用说明.md)。
+
+### ② 团队版中心 —— 几个人共享订单，推荐
+
+```bash
+cd app && node tools/build-hub.mjs --with-browser   # 产出 windows/dist/木言/
+```
+
+把那个文件夹拷到一台**能常开的电脑**上，双击 `启动.cmd`，
+把窗口里显示的网址发给销售。**不装 Docker、不装数据库、不装 Node。**
+
+销售在前台出单，老板在后台看全部。**实测验证过：alice 看不到 bob 的单，
+alice 冒用 bob 名义出单会被服务端拒绝。**
+
+> 详细步骤、端口冲突、让销售在外面也能用（Tailscale）见
+> [`windows/HUB.md`](windows/HUB.md)。
+
+### ③ Docker 版 —— 有服务器时用
+
+```bash
+cd deploy
+cp .env.example .env          # 改掉里面的 COUCHDB_ADMIN_PASS
+docker compose up -d
+docker compose logs app       # 取初始密码（只打印一次）
+```
+
+浏览器打开 `https://<你的地址>`。**HTTPS 由 Caddy 自动配好**：
+填 IP 用内部 CA（首次点一次信任），填域名自动申请 Let's Encrypt 证书。
+
+> ⚠️ **这一步不能省 HTTPS**：没有它，登录密码是明文过网的，密码认证等于白做。
+
+完整步骤（端口冲突、证书警告、备份、排障）见
+[`deploy/README.md`](deploy/README.md)。
+
 ## 唯一的隔离需求
 
 **把不同销售人员的出单区分开。** 仅此一项：
@@ -34,32 +91,12 @@
 产品等共享文档              全公司可见         → 不做隔离
 ```
 
-> **授权在哪里执行**：在**服务端**（`app/server/sync.mjs`），不在 CouchDB。
-> 实测确认靠 CouchDB 的 `userCtx` 行不通——同步全经过服务端代理，
-> 而代理只能用一个账号连库。详见主文档 §10.3.4。
+**授权在服务端执行**，不在客户端、也不靠 CouchDB 的 `userCtx`。
+实测确认靠 `userCtx` 行不通——同步全经过服务端代理，而代理只能用一个账号连库。
+两套同步实现（CouchDB 路线 / 自带存储路线）**共用同一份授权规则**
+（`app/server/authz.mjs`）：两边各写一套迟早走样，而**授权走样是安全事故**。
 
-## 快速开始
-
-需要 **Docker**。就四步：
-
-```bash
-cd deploy
-cp .env.example .env          # 改掉里面的 COUCHDB_ADMIN_PASS
-docker compose up -d
-docker compose logs app       # 取初始密码（只打印一次）
-```
-
-然后浏览器打开 `https://<你的地址>`。
-
-**HTTPS 由 Caddy 自动配好**：填 IP 用内部 CA（浏览器首次点一次信任），
-填域名自动申请 Let's Encrypt 可信证书。
-
-建库、建账号、写权限文档、装中文字体全部自动完成。
-
-> ⚠️ **这一步不能省 HTTPS**：没有它，登录密码是明文过网的，密码认证等于白做。
-
-完整步骤（端口冲突、证书警告、备份、排障）见
-[`deploy/README.md`](deploy/README.md)。
+详见主文档 [§3.3](docs/项目主文档.md) 与 §10.3.4。
 
 ## 装好之后怎么用
 
@@ -68,31 +105,29 @@ docker compose logs app       # 取初始密码（只打印一次）
 | **管理员**（admin） | 设置页里新建销售账号、重置密码、停用离职人员 |
 | **销售** | 登录 → 产品页拍照录入 → 开单选货 → 一键出画册 PDF 发客户 |
 
-- 客户端是**浏览器**，销售只拿到一个网址。不用装 App
-- 服务端 CouchDB 是**权威副本**，本地库只作缓存：手机被清理也不会丢单
+- 客户端是**浏览器**，销售只拿到一个网址（或一个文件）。不用装 App
 - **断网也能开单**，恢复网络后自动补传，界面上明确标"未同步"
-
-详见主文档 [§2b 部署简易性要求](docs/项目主文档.md)。
+- 单机版完全没有"同步"这件事——数据只在本机
 
 ## 📖 项目文档
 
 **唯一真相源：[`docs/项目主文档.md`](docs/项目主文档.md)**
 
-所有设计决策、数据模型、技术选型、依赖实测结论、开工优先级都在其中。
+所有设计决策、数据模型、技术选型、依赖实测结论、当前进度都在其中。
 本 README 只做导航，不重复内容——避免出现两份互相矛盾的说明。
 
 各步的实测证据（含复现命令与环境踩坑）：
 
-| 步骤 | 结论文档 |
+| 文档 | 内容 |
 |---|---|
-| 第 1 步 过滤同步协议层 | [`sync/docs/第1步验证结论-过滤同步.md`](sync/docs/第1步验证结论-过滤同步.md) |
-| 第 2 步 产品与画册 | [`app/docs/第2步验证结论-产品与画册.md`](app/docs/第2步验证结论-产品与画册.md) |
-| 第 3 步 出单模块 | [`app/docs/第3步验证结论-出单模块.md`](app/docs/第3步验证结论-出单模块.md) |
-| 第 4 步 出单隔离接入同步 | [`app/docs/第4步验证结论-出单隔离接入同步.md`](app/docs/第4步验证结论-出单隔离接入同步.md) |
-| 附加 密码登录认证 | [`app/docs/认证验证结论-密码登录.md`](app/docs/认证验证结论-密码登录.md) |
-| 附加 账号管理 | [`app/docs/账号管理验证结论.md`](app/docs/账号管理验证结论.md) |
-| 第 6 步 一键部署 | [`app/docs/第6步验证结论-一键部署.md`](app/docs/第6步验证结论-一键部署.md) |
-| 画册生成链路 | [`catalog/docs/画册链路验证结论.md`](catalog/docs/画册链路验证结论.md) |
+| [`windows/HUB.md`](windows/HUB.md) | 团队版中心：打包、使用、排障 |
+| [`app/docs/手机单机版使用说明.md`](app/docs/手机单机版使用说明.md) | 单机版使用说明（给不会用电脑的人） |
+| [`deploy/README.md`](deploy/README.md) | Docker 部署指南 |
+| [`app/docs/认证验证结论-密码登录.md`](app/docs/认证验证结论-密码登录.md) | 密码登录 |
+| [`app/docs/账号管理验证结论.md`](app/docs/账号管理验证结论.md) | 账号管理 |
+| [`app/docs/第4步验证结论-出单隔离接入同步.md`](app/docs/第4步验证结论-出单隔离接入同步.md) | 出单隔离 |
+| [`catalog/docs/画册链路验证结论.md`](catalog/docs/画册链路验证结论.md) | 画册生成链路 |
+| [`sync/docs/第1步验证结论-过滤同步.md`](sync/docs/第1步验证结论-过滤同步.md) | 过滤同步协议层 |
 
 这些都是主文档所引用的证据；**若不一致，以主文档为准**。
 里面记录了**踩过的坑和判断错的地方**，不是"一切顺利"的流水账——
@@ -106,131 +141,94 @@ docker compose logs app       # 取初始密码（只打印一次）
 | 使用范围 | **同一家经销商公司内部**，非多租户 |
 | 唯一的隔离规则 | **订单按 `sales_id` 过滤** —— 销售只看自己出的单，admin 看全部 |
 | 授权执行点 | **服务端**（不是 CouchDB 的 `userCtx`，实测行不通） |
-| 画册生成 | **Puppeteer + Chromium** —— `pdf-catalog-generator` 已实测证伪（中文乱码） |
+| 同步实现 | **两套**：CouchDB 复制协议 / 自带存储。授权规则共用一份 |
+| 冲突处理 | **乐观并发，不自动合并** —— 自动合并可能把一方刚改的成交价悄悄盖掉 |
+| 画册生成 | **Puppeteer + Chromium**，或**浏览器命令行** —— `pdf-catalog-generator` 已实测证伪（中文乱码） |
 | 出单模型 | 订单不可变 + 追加式修订 + `UNIQUE(order_id, version)` 原子冲突检测 |
 | 删除语义 | **只允许软删除**（硬删会丢业务字段，实测确认） |
 | 密码存储 | Node 内置 `scrypt` + 恒定时间比较，**零外部依赖** |
-| 密码找回 | **管理员重置**（不做短信/邮件自助，理由见[账号管理结论](app/docs/账号管理验证结论.md) §7） |
-| 兼容性基线 | iOS 15+ / Android 8+（待最终确认） |
+| 密码找回 | **管理员重置**（不做短信/邮件自助） |
 
 ## 目录结构
 
 ```
-furniture-sales-tool/
-├── LICENSE                        GPL-3.0
-├── docs/
-│   ├── 项目主文档.md              ★ 唯一真相源（设计决策、数据模型、实测结论）
-│   └── _archive/                  早期评估，仅存档
-├── deploy/                        ★ 部署（Docker Compose 三容器）
-│   ├── README.md                      给装机的人看的傻瓜化指南
-│   ├── docker-compose.yml             CouchDB + 应用 + Caddy(HTTPS)
-│   ├── Dockerfile                     含 Chromium 与中文字体
-│   └── Caddyfile                      HTTPS 与证书自动管理
-├── app/                           应用主体（服务端零外部依赖，只要 Node）
+├── docs/项目主文档.md          ★ 唯一真相源（设计决策、数据模型、实测结论、进度）
+├── windows/
+│   ├── HUB.md                      团队版中心：打包与使用说明
+│   └── hub/launcher.cjs            exe 启动壳（SEA 只支持 CJS 入口，见文件注释）
+├── deploy/                     Docker 部署（CouchDB + 应用 + Caddy）
+├── app/                        应用主体（服务端零外部依赖，只要 Node）
+│   ├── shared/catalog.mjs          ★ 画册排版：服务端与浏览器**共用一份**
 │   ├── server/
-│   │   ├── index.mjs                  HTTP 服务 + 路由
-│   │   ├── sync.mjs                   ★ 授权执行点（销售只能读写自己的单）
-│   │   ├── startup.mjs                启动自检（等 CouchDB、自动建库建账号）
-│   │   ├── sales.mjs                  账号与身份
-│   │   ├── password.mjs               scrypt 密码哈希
-│   │   ├── auth.mjs                   会话
-│   │   ├── store.mjs                  产品与设置
-│   │   ├── orders.mjs                 订单业务规则（供测试）
-│   │   └── render-catalog.mjs         画册渲染 + 分页断言 + PDF
-│   ├── public/                        界面（手机优先）
-│   │   ├── app.mjs syncdb.mjs style.css index.html
-│   │   └── vendor/pouchdb.min.js      第三方构建（用 tools/vendor-pouchdb.mjs 生成）
-│   ├── assets/sample-assets/          示例产品图（随镜像分发）
-│   └── tools/                         七个验证脚本 + 初始化工具
-├── catalog/                       画册链路验证工程（含失败方案的留存）
-└── sync/                          过滤同步协议层验证工程
+│   │   ├── index.mjs               HTTP 服务 + 路由
+│   │   ├── authz.mjs               ★ 授权规则唯一来源（两套同步共用）
+│   │   ├── syncdb / sync.mjs       CouchDB 路线：代理 + 授权
+│   │   ├── orderstore.mjs          自带存储：订单 JSON + 单调序列号
+│   │   ├── datadir.mjs             数据目录唯一来源（便携版靠它）
+│   │   └── render-catalog.mjs      服务端出 PDF（puppeteer 或浏览器命令行）
+│   ├── public/                     界面（手机优先）
+│   │   ├── app.mjs backend.mjs localdb.mjs syncdb.mjs
+│   │   └── _selftest.html          设备自检页（真机排障用）
+│   └── tools/                      验证脚本 + 打包工具
+├── catalog/                    画册链路验证工程（含失败方案的留存）
+└── sync/                       过滤同步协议层验证工程
 ```
 
 ## 进度
 
 ```
 第 0 步  前置决策                                    ✅ 已完成
-第 1 步  PouchDB ↔ CouchDB 双向同步                   ✅ 已完成（22/22）
+第 1 步  PouchDB ↔ CouchDB 双向同步                   ✅ 已完成（21/21）
 第 2 步  产品管理 + 画册生成                           ✅ 已完成
-第 3 步  出单记录模块                                  ✅ 已完成（45/45）
-第 4 步  出单隔离接入同步层                            ✅ 已完成（代理 23/23、端到端 20/20）
+第 3 步  出单记录模块                                  ✅ 已完成（41/41）
+第 4 步  出单隔离接入同步层                            ✅ 已完成（代理 23/23、端到端 22/22）
    附加  密码登录认证                                  ✅ 已完成（25/25）
    附加  账号管理（建号/重置/停用）                     ✅ 已完成（51/51）
+第 6 步  Docker 一键部署 + 自动 HTTPS                  ✅ 已完成
+────── 无脑化阶段（目标：很多人不会用电脑）──────
+单人版   一个文件，不需要服务器                        ✅ 已完成（20/20，平板实测）
+团队版   中心自带存储，不再需要 CouchDB                ✅ 已完成（27/27，平板实测）
+服务端出 PDF 改用浏览器命令行                          ✅ 已完成（14/14）
 第 5 步  数据迁移（把旧系统产品导进来）                 ⬜ 未开始（可选，手动录入已可用）
-第 6 步  一键部署 + 自动 HTTPS                         ✅ 已完成
+推 GitHub                                            ⬜ 待定（等仓库地址）
 ```
 
-**全套验证共 239 项断言，当前全绿。** 每一条都是实测出来的，
-过程与踩坑记录在各步的结论文档里（见下文"实测证据"）。
+**全套验证共 341 项断言，当前全绿。** 每一条都是实测出来的，
+过程与踩坑记录在各步的结论文档里。
 
-## 部署：一条命令
+## 跑验证
 
 ```bash
-cd deploy
-cp .env.example .env      # 改掉里面的 COUCHDB_ADMIN_PASS
-docker compose up -d
-docker compose logs app   # 取初始密码（只打印一次）
-```
-
-然后浏览器打开 `https://<你的地址>`。
-
-**HTTPS 由 Caddy 自动配好**：填 IP 用内部 CA（浏览器首次点一次信任），
-填域名自动申请 Let's Encrypt 可信证书。**这一步不能省**——没有 HTTPS，
-登录密码是明文过网的，密码认证等于白做。
-
-建库、建账号、写权限文档、装中文字体全部自动完成。
-
-完整步骤（含端口冲突、证书警告、备份、排障）见
-[`deploy/README.md`](deploy/README.md)。
-
-## 本机开发（不用 Docker）
-
-需要本机有一个 CouchDB（3.5 即可）。凭据放 `app/.env`，**不入库**。
-
-```powershell
 cd app
-copy .env.example .env                                # 填 CouchDB 地址与管理员口令
-node tools/seed-sample-data.mjs                       # 导入 5 款示例产品
-$env:DEV_ALLOW_PASSWORDLESS_LOGIN='1'                 # 仅本机：允许验证脚本免密登录
-node --env-file=.env server/index.mjs                 # 打开 http://127.0.0.1:8080
+node tools/verify-auth.mjs              # 认证            25 项
+node tools/verify-accounts.mjs          # 账号管理        51 项
+node tools/verify-orders.mjs            # 出单模块        41 项
+node tools/verify-sync-proxy.mjs        # 同步代理授权    23 项
+node tools/verify-hub-e2e.mjs           # 中心自带存储    27 项
+node tools/verify-solo-bundle.mjs       # 单文件版        20 项
+node tools/verify-catalog-pdf.mjs       # 画册出 PDF      23 项
+node tools/verify-catalog-cli-pdf.mjs   # 命令行出 PDF    14 项
+node tools/ui-screenshot.mjs            # 界面            74 项
 ```
 
-**首次启动会在日志里打印各账号的初始密码（只打印一次），首次登录后需修改。**
-
-### 跑验证
-
-七套脚本，共 **239 项断言**。任意一套失败都会打印具名原因。
-
-```powershell
-node tools/verify-auth.mjs                            # 认证         25 项
-node tools/verify-accounts.mjs                        # 账号管理     51 项
-node tools/verify-orders.mjs                          # 出单模块     45 项
-node --env-file=.env tools/verify-real-couchdb.mjs     # 同步与隔离   22 项
-node tools/verify-sync-proxy.mjs                      # 同步代理授权 23 项
-node --env-file=.env tools/verify-e2e-sync.mjs         # 端到端同步   20 项
-node --env-file=.env tools/ui-screenshot.mjs           # 界面         75 项
-```
-
-- `verify-auth.mjs` / `verify-accounts.mjs` 需要初始密码：
-  从服务端启动日志取，用 `$env:PW_ADMIN="…"` 这类环境变量传入
-- 界面与端到端脚本需要 Chromium（本机用 `catalog/` 里装的 puppeteer；
-  容器里自动改用系统 Chromium，见 `tools/browser.mjs`）
+- 需要初始密码的脚本用 `$env:PW_ADMIN="…"` 这类环境变量传入
+  （密码在服务端启动日志里，只打印一次）
+- 界面与端到端脚本需要浏览器（本机用 `catalog/` 里装的 puppeteer；
+  容器里自动改用系统 Chromium）
 
 > ⚠️ `verify-orders.mjs` 会清空本地订单数据后重建，**不要在正式数据上运行**。
 
-## 数据流
+### 真机排障：自检页
 
-```
-销售浏览器
-├── 本地 PouchDB (IndexedDB)   订单列表读这里，离线可用
-│     └── _local/unsynced       待上行清单 → 列表上显示"未同步"
-│   push / pull（必须用绝对 URL，见主文档 §10.3.4.2）
-▼
-服务端（会话认证：账号 + 密码，scrypt 哈希）
-└── 同步代理 /api/sync/orders/*   授权在这里执行：销售只能读写自己的单
-▼
-CouchDB orders 库              权威副本：手机被清理也不丢单
-```
+客户现场出问题时，让对方打开 `http://<中心地址>/_selftest.html`。
+
+它用应用**自己的代码**跑一遍完整流程（登录 → 建单 → 上传 → 拉回 → 画册排版），
+结果直接显示在屏幕上，不需要点任何东西。
+服务端用 `FS_DEBUG_REQUESTS=1` 启动时，结果还会自动上报到
+`data/.tmp/selftest-report.json`，不用用户逐条念。
+
+> 真机联调最难的是"看不到设备上发生了什么"——截屏在部分机型上不可用。
+> 让设备自己跑、自己报，就不用猜。
 
 ## 已知限制
 
@@ -238,15 +236,18 @@ CouchDB orders 库              权威副本：手机被清理也不丢单
 
 | 限制 | 影响 | 优先级 |
 |---|---|---|
-| **产品数据不参与多端同步** | 产品存在服务端本地文件；多实例部署时各自一份。**单实例部署无影响** | 🟠 |
+| 🔴 **Linux 容器出 PDF 的汉字会被写成康熙部首** | 字形看着正常，但**复制、搜索全失效**。实测容器里汉字 124 / 部首 25；**Windows 上没这问题**（145 / 0）。规避：用「打印为 PDF」 | 🔴 |
 | **登录失败无次数限制** | 理论上可暴力破解密码。内网部署风险较低 | 🟠 |
 | **无操作审计日志** | 看不出"谁改了谁的账号" | 🟠 |
-| 服务端出画册 PDF 未在容器实测 | 镜像里已带 Chromium；**「打印为 PDF」那条路径更可靠**，是给销售的默认路径 | 🟡 |
-| 示例数据是程序画的示意图，不是真家具照片 | 只影响第一眼观感。换真照片只需替换 `app/assets/sample-assets/` | 🟡 |
+| **真机覆盖不足** | 只在小米平板 5（Android 13 / MIUI 浏览器）上实测过；**iOS Safari 与微信内置浏览器未测** | 🟠 |
+| 单机版数据只在浏览器里 | 清浏览器数据 / 换手机会丢。已提供导出备份并反复提示 | ⚠️ 设计取舍 |
+| 团队版中心走 HTTP 不加密 | 局域网 + 密码登录够用；要公网用请上 Tailscale | 🟡 |
+| 产品或订单不可导出 Excel | 原方案要求"可导出"，未做 | 🟡 |
+| 订单列表无分页/搜索 | 当前全量渲染，单量大了需要加 | 🟡 |
+| 示例数据是程序画的示意图 | 只影响第一眼观感。换真照片只需替换 `app/assets/sample-assets/` | 🟡 |
 | 账号不能改名 | 登录名就是订单归属，改名会让历史订单对不上。这是刻意的 | ✅ 设计如此 |
-| 兼容性基线未最终确认 | 建议 iOS 15+ / Android 8+ | 🟡 |
 
-完整的争议与技术债务登记见主文档 §16。
+完整的争议与技术债务登记（40 条）见主文档 §16。
 
 ## 贡献
 
@@ -255,12 +256,12 @@ CouchDB orders 库              权威副本：手机被清理也不丢单
 **所有结论都要有实测证据，不接受"看起来应该对"。**
 
 - 每个功能都有对应的验证脚本（`app/tools/verify-*.mjs`），
-  改完请跑一遍：`node tools/verify-xxx.mjs`
+  改完请跑一遍
 - 修 bug 时，**先写一条能复现它的断言**，再修。这样它能被永久盯住
 - 结论文档里记录失败方案与判断错误，不是流水账——
   知道"什么行不通"和知道"什么行得通"一样重要
 
-CI 会在每次推送时跑后端五套验证（见 `.github/workflows/verify.yml`）。
+CI 会在每次推送时跑后端验证（见 `.github/workflows/verify.yml`）。
 
 ## 许可
 
@@ -270,4 +271,3 @@ CI 会在每次推送时跑后端五套验证（见 `.github/workflows/verify.ym
 > （GPL-3.0），但最终**没有采用**——实测发现同步全经过服务端代理后，
 > CouchDB 的 `userCtx` 无法反映真实用户，于是改为服务端授权。
 > 因此当前代码**不包含**第三方项目代码，GPL-3.0 是本项目主动选择的许可。
-

@@ -1,4 +1,4 @@
-﻿# 家具经销商 · 电子画册与开单工具 —— Windows 一键启动
+﻿# 木言 · 开单画册 —— Windows 一键启动
 #
 # 用法：右键「使用 PowerShell 运行」，或者双击 `一键启动.bat`。
 #
@@ -26,7 +26,7 @@ function Fail($msg) { Write-Host "  [错误] $msg" -ForegroundColor Red }
 
 Say ''
 Say '  ┌─────────────────────────────────────────────┐' Cyan
-Say '  │   家具经销商 · 电子画册与开单工具           │' Cyan
+Say '  │   木言 · 开单画册           │' Cyan
 Say '  └─────────────────────────────────────────────┘' Cyan
 Say ''
 

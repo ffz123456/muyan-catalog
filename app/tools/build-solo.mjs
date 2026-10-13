@@ -307,7 +307,7 @@ const banner = `/* 单人模式单文件版 —— 由 tools/build-solo.mjs 生�
 
 await fs.mkdir(OUT_DIR, { recursive: true });
 const finalHtml = await assemble(banner + bundleJs);
-const outFile = path.join(OUT_DIR, '家具开单-单机版.html');
+const outFile = path.join(OUT_DIR, '木言-单机版.html');
 await fs.writeFile(outFile, finalHtml, 'utf-8');
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
