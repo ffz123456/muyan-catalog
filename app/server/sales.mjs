@@ -14,10 +14,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { hashPassword, verifyPassword, needsPassword, generateInitialPassword } from './password.mjs';
-
-const DATA_DIR = path.join(import.meta.dirname, '..', 'data');
-const SALES_FILE = path.join(DATA_DIR, 'sales.json');
-const CURRENT_FILE = path.join(DATA_DIR, 'current-sales.json');
+import { DATA_DIR, SALES_FILE, CURRENT_FILE } from './datadir.mjs';
 
 /** 内置账号。密码在首次初始化时随机生成。 */
 const BUILTIN_SALES = [

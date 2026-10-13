@@ -68,3 +68,13 @@ _acl-recovery/
 
 # 鏁版嵁鏂囦欢鎹熷潖鏃剁殑澶囦唤锛堣 server/sales.mjs readJson 鐨勮鏄庯級
 *.corrupt-*
+
+# Windows 中心版编译产物（可重建）
+windows/hub/_*
+windows/hub/*.exe
+windows/hub/*.blob
+windows/hub/hub-app.cjs
+windows/hub/sea-config.json
+
+.git-msg.txt
+

@@ -14,6 +14,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { A4, PER_PAGE, renderCatalogHtml as renderShared } from '../shared/catalog.mjs';
+import { ASSET_DIR, TMP_DIR } from './datadir.mjs';
 
 export { A4, PER_PAGE };
 
@@ -22,7 +23,6 @@ const MIME = {
   webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
 };
 
-const ASSET_DIR = path.join(import.meta.dirname, '..', 'data', 'assets');
 
 /** 本地图片 -> data URI。画册必须自包含：发给客户后不依赖网络与服务器存活。 */
 async function fileToDataUri(absPath) {
@@ -61,12 +61,12 @@ export async function renderCatalogHtml({ products, settings, assetDir = ASSET_D
  *   便携版需要显式指定浏览器路径，不能靠 puppeteer 自己找。
  */
 export async function assertLayout(html, puppeteer, { writeDebugHtml, launchOptions = {} } = {}) {
-  const USER_DATA = path.join(import.meta.dirname, '..', 'data', '.chrome-profile');
+  const USER_DATA = path.join(TMP_DIR, '.chrome-profile');
   await fs.rm(USER_DATA, { recursive: true, force: true });
 
   let htmlPath = writeDebugHtml;
   if (!htmlPath) {
-    htmlPath = path.join(import.meta.dirname, '..', 'data', '.catalog-preview.html');
+    htmlPath = path.join(TMP_DIR, '.catalog-preview.html');
   }
   await fs.mkdir(path.dirname(htmlPath), { recursive: true });
   await fs.writeFile(htmlPath, html, 'utf-8');
@@ -111,10 +111,10 @@ export async function assertLayout(html, puppeteer, { writeDebugHtml, launchOpti
  *    报 Protocol error (IO.read)，实测不可用。
  */
 export async function renderCatalogPdf(html, puppeteer, outPath, { previewDir, launchOptions = {} } = {}) {
-  const USER_DATA = path.join(import.meta.dirname, '..', 'data', '.chrome-profile');
+  const USER_DATA = path.join(TMP_DIR, '.chrome-profile');
   await fs.rm(USER_DATA, { recursive: true, force: true });
 
-  const htmlPath = path.join(import.meta.dirname, '..', 'data', '.catalog-preview.html');
+  const htmlPath = path.join(TMP_DIR, '.catalog-preview.html');
   await fs.mkdir(path.dirname(htmlPath), { recursive: true });
   await fs.writeFile(htmlPath, html, 'utf-8');
 

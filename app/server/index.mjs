@@ -15,8 +15,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   listProducts, getProduct, upsertProduct, deleteProduct, replaceAllProducts,
-  getSettings, saveSettings, paths,
+  getSettings, saveSettings,
 } from './store.mjs';
+import {
+  DATA_ROOT, DATA_DIR, ASSET_DIR, EXPORT_DIR, ensureDirsSync,
+} from './datadir.mjs';
 // 注意：orders.mjs 仍然存在，但服务端已不再直接读写它——
 // 订单的权威存储是 CouchDB，客户端通过 /api/sync/orders/* 同步。
 // orders.mjs 目前仅供测试脚本（verify-orders.mjs）验证业务规则使用。
@@ -36,8 +39,7 @@ import { DB as COUCH_DB, config as couchConfig } from './couch.mjs';
 
 const HERE = import.meta.dirname;
 const PUBLIC_DIR = path.join(HERE, '..', 'public');
-const ASSET_DIR = path.join(HERE, '..', 'data', 'assets');
-const EXPORT_DIR = path.join(HERE, '..', 'data', 'exports');
+// 数据目录统一由 datadir.mjs 决定（便携版靠 FS_DATA_ROOT 让数据跟着程序包走）
 
 const VENDOR_DIR = path.join(HERE, '..', 'public', 'vendor');
 const PORT = Number(process.env.PORT) || 8080;
@@ -591,8 +593,8 @@ const server = http.createServer(async (req, res) => {
 
 // 首次启动自动初始化数据目录（§2b.5 第 3 条：不让人手工建目录/写配置）
 async function bootstrap() {
-  await fs.mkdir(ASSET_DIR, { recursive: true });
-  await fs.mkdir(EXPORT_DIR, { recursive: true });
+  // 目录一次建齐（含临时目录）。便携版解压后第一次运行也靠它。
+  ensureDirsSync();
   await getSettings();          // 不存在时返回默认值
 
   // 首次运行会为每个账号生成随机初始密码；这里打印一次（不写入任何日志文件）
@@ -613,7 +615,7 @@ async function bootstrap() {
   console.log('  ────────────────────────────────────────');
   console.log(`  监听地址：  http://${HOST}:${PORT}`);
   console.log(`  产品：${products.length} 款    销售账号：${sales.length} 个`);
-  console.log(`  数据目录：${paths.DATA_DIR}`);
+  console.log(`  数据目录：${DATA_DIR}`);
 
   if (syncState) {
     console.log(`  同步枢纽：${couchConfig.base}  数据库 ${syncState.db}  CouchDB ${syncState.version}`);

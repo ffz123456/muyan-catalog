@@ -13,9 +13,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-
-const DATA_DIR = path.join(import.meta.dirname, '..', 'data');
-const ORDERS_DIR = path.join(DATA_DIR, 'orders');
+import { DATA_DIR, ORDERS_DIR } from './datadir.mjs';
 
 /* ---------------- 写入串行化 ---------------- *
  * Node 是单线程，但 await 之间会交错。若不串行，

@@ -11,10 +11,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-
-const DATA_DIR = path.join(import.meta.dirname, '..', 'data');
-const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+import { DATA_DIR, PRODUCTS_FILE, SETTINGS_FILE } from './datadir.mjs';
 
 const DEFAULT_SETTINGS = {
   companyName: '家具经销商',
