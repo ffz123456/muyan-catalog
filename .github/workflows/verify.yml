@@ -61,6 +61,15 @@ jobs:
       - name: 生成 PouchDB 浏览器构建
         run: cd app && node tools/vendor-pouchdb.mjs
 
+      # 出单套件需要产品数据才能跑（至少 2 款：一款测目录价、一款测让价）。
+      # data/ 是 gitignore 的，checkout 出来是空的，所以必须先导入示例数据。
+      #
+      # ⚠️ 这一步最初漏了，CI 从第一次推送起就一直是红的。
+      #    教训：**CI 里跑的应该是"新人照文档做一遍"的完整流程**，
+      #    而不是"在我已经配好的机器上能跑的东西"。
+      - name: 导入示例数据
+        run: cd app && node tools/seed-sample-data.mjs
+
       - name: 启动服务端
         run: |
           cd app
