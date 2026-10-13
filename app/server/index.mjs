@@ -34,8 +34,20 @@ import {
   couchAs, createSession, readSession, destroySession, sessionCookie, clearCookie, canSeeAll,
 } from './auth.mjs';
 import { handleSync, resetVisibilityCache } from './sync.mjs';
+import { pull as hubPull, push as hubPush } from './hubsync.mjs';
 import { ensureCouchReady } from './startup.mjs';
 import { DB as COUCH_DB, config as couchConfig } from './couch.mjs';
+
+/**
+ * 这个中心有没有配置数据库。
+ *
+ * 两种部署形态：
+ *   · 有 CouchDB（原来的 Docker / 本机部署）→ 走复制协议代理
+ *   · 没有（自研中心，一个 exe 双击即用）→ 订单存自带文件，走 /api/hub/*
+ *
+ * 客户端会先探 /api/capabilities，据此选传输方式，不需要用户关心。
+ */
+const couchEnabled = !!process.env.COUCHDB_URL;
 
 const HERE = import.meta.dirname;
 const PUBLIC_DIR = path.join(HERE, '..', 'public');
@@ -234,11 +246,47 @@ async function handleApi(req, res, url) {
     return send(res, 200, await changePassword(s.name, String(body.oldPassword ?? ''), String(body.newPassword ?? '')));
   }
 
-  /* ---- 同步代理 ----
+  /* ---- 自研中心同步 ----
+   * 不依赖 CouchDB：订单存 <数据目录>/orders.json，变更带单调序列号。
+   * 授权用**同一份规则**（server/authz.mjs），与 CouchDB 那条路一致。
+   *
+   * 为什么要有这一套：CouchDB 在 Windows 上没有便携版（官方 issue #3028），
+   * 装它要管理员权限、要装服务，而"很多人不会用电脑"。
+   * 中心自带存储后，一个 exe + 一个数据文件就能双击即用。
+   */
+  if (p === '/api/hub/pull' && req.method === 'POST') {
+    const s = readSession(req);
+    if (!s) return fail(res, 401, '未登录');
+    const sales = await findSales(s.name);
+    if (!sales) return fail(res, 401, '会话对应的销售不存在');
+
+    const body = await readBody(req);
+    return send(res, 200, await hubPull({ sales, since: body?.since ?? 0 }));
+  }
+
+  if (p === '/api/hub/push' && req.method === 'POST') {
+    const s = readSession(req);
+    if (!s) return fail(res, 401, '未登录');
+    const sales = await findSales(s.name);
+    if (!sales) return fail(res, 401, '会话对应的销售不存在');
+
+    const body = await readBody(req);
+    const r = await hubPush({ sales, changes: body?.changes ?? [] });
+    return send(res, 200, r);
+  }
+
+  /* ---- 同步代理（CouchDB 路线）----
    * 把 CouchDB 的复制协议端点转发出去，**授权由服务端执行**
-   * （规则集中在 server/sync.mjs，见该文件顶部说明）。
+   * （规则集中在 server/authz.mjs，见该文件顶部说明）。
+   *
+   * 这条路需要一个可用的 CouchDB；没有配置时会明确报错而不是静默失败。
    */
   if (p.startsWith('/api/sync/')) {
+    if (!couchEnabled) {
+      return fail(res, 503,
+        '这个中心没有配置数据库，正在用自带存储。'
+        + '客户端的同步会自动走 /api/hub/*，不需要这个端点。');
+    }
     const s = readSession(req);
     if (!s) return fail(res, 401, '未登录');
     const sales = await findSales(s.name);
@@ -405,7 +453,15 @@ async function handleApi(req, res, url) {
    */
   if (p === '/api/capabilities' && req.method === 'GET') {
     const { browserStatus } = await import('./browser.mjs');
-    return send(res, 200, { serverPdf: await browserStatus() });
+    return send(res, 200, {
+      serverPdf: await browserStatus(),
+      /**
+       * 同步方式：客户端据此选传输层，**不需要用户关心**。
+       *   'hub'  = 中心自带存储，走 /api/hub/*
+       *   'couch' = 有 CouchDB，走复制协议代理 /api/sync/*
+       */
+      syncMode: couchEnabled ? 'couch' : 'hub',
+    });
   }
 
   if (p === '/api/catalog/preview' && req.method === 'POST') {
@@ -601,10 +657,21 @@ async function bootstrap() {
   const [products, sales, cur] = await Promise.all([listProducts(), listSalesPublic(), currentSales()]);
   const initial = takeStartupNotice();
 
-  // 同步层自检：等 CouchDB、建库、写设计文档。
-  // 失败要明确报错并退出——同步不可用却装作可用，比直接失败更危险。
+  /**
+   * 同步层自检。
+   *
+   * 两种形态：
+   *   · 配了 CouchDB → 等它就绪、建库、写设计文档。失败要明确报错并退出——
+   *     同步不可用却装作可用，比直接失败更危险。
+   *   · 没配 CouchDB（自研中心）→ 用自带文件存储，**不需要等任何外部服务**。
+   *     这正是"双击即用"的前提。
+   */
   let syncState = null;
-  if (process.env.SKIP_SYNC_BOOTSTRAP === '1') {
+  if (!couchEnabled) {
+    const { stats } = await import('./orderstore.mjs');
+    const st = await stats();
+    console.log(`  订单存储：自带文件（${st.live} 张单 / 共 ${st.total} 条记录，序列号 ${st.seq}）`);
+  } else if (process.env.SKIP_SYNC_BOOTSTRAP === '1') {
     console.log('  ⚠️  已按 SKIP_SYNC_BOOTSTRAP=1 跳过同步层自检（仅用于离线开发）');
   } else {
     syncState = await ensureCouchReady({ log: (m) => console.log(m) });

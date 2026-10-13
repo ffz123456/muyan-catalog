@@ -136,15 +136,28 @@ async function resetReplicationCheckpoints() {
 async function purgeUnauthorizedLocals() {
   if (!state.online) return { skipped: 'offline', removed: 0 };
 
+  /**
+   * 先问服务端"我现在能看到哪些订单"。
+   *
+   * 两种传输的端点不同，但**问的是同一件事**：
+   *   couch → /api/sync/orders/_changes?since=0
+   *   hub   → /api/hub/pull { since: 0 }
+   * 两边都已在服务端做过授权过滤，所以拿到的是"我该看到的集合"。
+   */
   let allowed;
   try {
-    const res = await fetch(
-      new URL('/api/sync/orders/_changes?since=0', window.location.origin),
-      { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
-    );
-    if (!res.ok) return { skipped: `http ${res.status}`, removed: 0 };
-    const data = await res.json();
-    allowed = new Set((data.results ?? []).map((r) => r.id));
+    if (transport === 'hub') {
+      const r = await postJson('/api/hub/pull', { since: 0 });
+      allowed = new Set((r?.changes ?? []).map((c) => c.id));
+    } else {
+      const res = await fetch(
+        new URL('/api/sync/orders/_changes?since=0', window.location.origin),
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+      );
+      if (!res.ok) return { skipped: `http ${res.status}`, removed: 0 };
+      const data = await res.json();
+      allowed = new Set((data.results ?? []).map((r) => r.id));
+    }
   } catch {
     return { skipped: 'request failed', removed: 0 };
   }
@@ -174,7 +187,167 @@ async function purgeUnauthorizedLocals() {
   return { removed };
 }
 
-/** 双向同步一次。并发调用会被合并，避免同时跑两个复制。 */let inflight = null;
+/* ------------------------------------------------------------------ *
+ * 同步传输层 —— **两种实现，同一套语义**
+ *
+ *   'couch'  CouchDB 复制协议（PouchDB replicate，经 /api/sync/* 代理）
+ *   'hub'    中心自带存储（/api/hub/push 与 /api/hub/pull）
+ *
+ * 为什么要有 hub 这一套：
+ *   CouchDB 在 Windows 上没有便携版（官方 issue #3028），装它要管理员权限、
+ *   要装服务，而"很多人不会用电脑"。中心自带存储后，一个 exe + 一个数据文件
+ *   就能双击即用。
+ *
+ * 为什么不去模拟 PouchDB 的复制协议：
+ *   实测抓到它完整的行为——`GET /db/`、`_local/<hash>` 读写检查点、
+ *   `_revs_diff`、`_changes?since=&style=all_docs`、`_bulk_docs`，
+ *   还有检查点里那套 `history` 数组。要兼容就得把这些形状**全部**做对；
+ *   错一处不会报错，只是**静默不同步**——正是这个项目反复踩过的那类故障。
+ *   自定义协议的语义是写出来的，能直接被断言。
+ * ------------------------------------------------------------------ */
+
+/** 当前用哪种传输。由 app.mjs 在探测服务端能力后设置。 */
+let transport = 'couch';
+export function setTransport(mode) {
+  transport = mode === 'hub' ? 'hub' : 'couch';
+}
+export const currentTransport = () => transport;
+
+/** 统一的 JSON 请求小工具。 */
+async function postJson(path, body) {
+  const res = await fetch(new URL(path, window.location.origin), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body ?? {}),
+  });
+  const text = await res.text();
+  let parsed;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  if (!res.ok) {
+    const err = new Error(parsed?.error ?? `同步失败（HTTP ${res.status}）`);
+    err.status = res.status;
+    throw err;
+  }
+  return parsed;
+}
+
+/**
+ * 拉取位置（hub 专用）。
+ *
+ * CouchDB 那套把检查点存在服务端的 `_local/` 文档里。
+ * 自带存储没有那个概念，所以把"上次拉到哪"存在**本地**。
+ * 顺带避免了原来"检查点被 pull 污染 push"那一类问题。
+ */
+const HUB_SEQ_DOC = '_local/hub-since';
+
+async function readHubSeq() {
+  try {
+    const d = await state.db.get(HUB_SEQ_DOC);
+    return Number(d.seq) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeHubSeq(seq) {
+  const cur = await state.db.get(HUB_SEQ_DOC).catch(() => null);
+  await state.db.put({
+    _id: HUB_SEQ_DOC,
+    seq: Number(seq) || 0,
+    ...(cur ? { _rev: cur._rev } : {}),
+  });
+}
+
+/** 记下"服务端那份"的修订号（乐观并发要用）。 */
+async function rememberHubRev(id, rev) {
+  try {
+    const cur = await state.db.get(id);
+    if (cur.hubRev === rev) return;
+    await state.db.put({ ...cur, hubRev: rev });
+  } catch { /* 忽略 */ }
+}
+
+/** 去掉只属于本地的字段，别推给服务端。 */
+function stripLocal(doc) {
+  const { hubRev, _revisions, ...rest } = doc;
+  void hubRev; void _revisions;
+  return rest;
+}
+
+/**
+ * hub 传输：推。
+ *
+ * 只推**待上行清单里的**那些单，不是把整个本地库推一遍。
+ * 为什么：本地库里还有从服务端拉下来的别人的单（admin 视角）与历史上行成功的单。
+ * 全量推既浪费，也可能覆盖服务端更新的版本。
+ */
+async function hubPush() {
+  const pending = await readPendingIds();
+  if (!pending.size) return { pushedIds: new Set(), errors: 0 };
+
+  const changes = [];
+  for (const id of pending) {
+    try {
+      const doc = await state.db.get(id);
+      // rev 送的是**服务端那份**的修订号；新建的单没有 → null
+      changes.push({ id, rev: doc.hubRev ?? null, doc: stripLocal(doc) });
+    } catch { /* 本地已删，跳过 */ }
+  }
+  if (!changes.length) return { pushedIds: new Set(), errors: 0 };
+
+  const r = await postJson('/api/hub/push', { changes });
+  const pushedIds = new Set();
+  let errors = 0;
+
+  for (const item of r?.results ?? []) {
+    if (item.ok) {
+      pushedIds.add(item.id);
+      await rememberHubRev(item.id, item.rev);
+      continue;
+    }
+    /**
+     * 冲突（服务端有更新版本）与其它错误都算"没推上去"：
+     * 留它在待上行清单里，界面显示"未同步"，由人决定怎么办。
+     *
+     * 为什么不自动重试覆盖：那会把服务端更新的版本悄悄盖掉。
+     * 业务上该由人决定留哪个——自动合并可能把一方刚改的成交价弄丢。
+     */
+    errors++;
+  }
+
+  return { pushedIds, errors };
+}
+
+/** hub 传输：拉。 */
+async function hubPull() {
+  const since = await readHubSeq();
+  const r = await postJson('/api/hub/pull', { since });
+  const changes = r?.changes ?? [];
+
+  let errors = 0;
+  for (const c of changes) {
+    try {
+      const doc = c.doc;
+      if (!doc) continue;
+      const cur = await state.db.get(c.id).catch(() => null);
+      const next = { ...doc, _id: c.id };
+      if (cur) next._rev = cur._rev;      // 本地已有同 id，要基于现有修订写
+      await state.db.put(next);
+      await rememberHubRev(c.id, c.rev);
+    } catch {
+      errors++;    // 单条失败不中断整轮，下一轮还会再拉到它
+    }
+  }
+
+  // 只有整轮没出错才推进序列号；否则下一轮重拉，至少不会丢
+  if (!errors) await writeHubSeq(r?.lastSeq ?? since);
+  return { errors };
+}
+
+/** 双向同步一次。并发调用会被合并，避免同时跑两个复制。 */
+let inflight = null;
+
 export function sync() {
   if (inflight) return inflight;
   inflight = (async () => {
@@ -182,56 +355,83 @@ export function sync() {
     emit();
     try {
       /**
-       * ⚠️ 用**独立的 push + pull 两次复制**，不用 PouchDB.sync()。
+       * 两种传输，**同一套语义**：先推后拉，只有真推上去的才移出待上行清单。
        *
-       * 实测问题：PouchDB.sync() 的双向复制让 push 与 pull 共用同一个检查点，
-       * pull 写进去的服务端序列号（"16-g1AAA..." 字符串）会污染 push 的判断，
-       * 导致本地新写入的单**推不上去且不报错**（docs_read=0 / docs_written=0）。
-       * 这直接违反 §2b.3 红线（本地不能存在只在本机、未上行的订单）。
-       *
-       * 所以：先清双向检查点 -> 单独 push -> 再单独 pull。
+       * ⚠️ CouchDB 那条路必须用**独立的 push + pull 两次复制**，不用 PouchDB.sync()。
+       *   实测问题：PouchDB.sync() 的双向复制让 push 与 pull 共用同一个检查点，
+       *   pull 写进去的服务端序列号（"16-g1AAA..." 字符串）会污染 push 的判断，
+       *   导致本地新写入的单**推不上去且不报错**（docs_read=0 / docs_written=0）。
+       *   这直接违反 §2b.3 红线（本地不能存在只在本机、未上行的订单）。
+       *   hub 那条路把"拉到哪"记在本地，不存在这个污染问题。
        */
-      await resetReplicationCheckpoints();
-      const push = await state.db.replicate.to(REMOTE, { batch_size: 50, retry: false });
-      state.lastSyncAt = new Date();
-
-      const pushErr = push?.errors?.length ?? 0;
-      if (pushErr) {
-        state.lastError = `上传失败 ${pushErr} 条`;
-      } else {
-        // 只把**本次真正推送成功**的文档移出待上行清单。
-        // 全清是错的：若本轮没推送任何文档（例如还没写入），
-        // 全清会把上一轮遗留的未同步标记一并抹掉，掩盖真实风险。
-        const pushed = new Set(
-          (push?.docs ?? [])
-            .map((d) => d?._id ?? d?.id)
-            .filter(Boolean),
-        );
-        if (pushed.size) {
-          await clearPending(pushed);
-        } else {
-          // 没推送任何文档时，顺带确认清单是否本就为空
-          await recountPending();
-        }
-        state.lastError = null;
-      }
-      emit();
-
-      // 拉取放在推送之后：即使拉取失败，本次写入也已经安全到达服务端
+      let push = null;
       let pull = null;
-      try {
-        pull = await state.db.replicate.from(REMOTE, { batch_size: 50, retry: false });
-        const pullErr = pull?.errors?.length ?? 0;
-        if (pullErr) state.lastError = `下载失败 ${pullErr} 条`;
-        state.lastSyncAt = new Date();
-      } catch (e) {
-        state.lastError = `下载失败：${e.message}`;
-      }
-      emit();
 
-      // pull 会把服务端序列号写进检查点；下一轮 push 之前必须清掉，
-      // 否则又会污染 push 的判断（这是上面那段注释描述的问题的防线）
-      await resetReplicationCheckpoints();
+      if (transport === 'hub') {
+        push = await hubPush();
+        state.lastSyncAt = new Date();
+        if (push.errors) state.lastError = `上传失败 ${push.errors} 条`;
+        else state.lastError = null;
+        emit();
+
+        // 拉取放在推送之后：即使拉取失败，本次写入也已安全到达服务端
+        try {
+          pull = await hubPull();
+          if (pull.errors) state.lastError = `下载失败 ${pull.errors} 条`;
+          state.lastSyncAt = new Date();
+        } catch (e) {
+          state.lastError = `下载失败：${e.message}`;
+        }
+        emit();
+      } else {
+        await resetReplicationCheckpoints();
+        const r = await state.db.replicate.to(REMOTE, { batch_size: 50, retry: false });
+        state.lastSyncAt = new Date();
+
+        const pushErr = r?.errors?.length ?? 0;
+        if (pushErr) {
+          state.lastError = `上传失败 ${pushErr} 条`;
+        } else {
+          /**
+           * 只把**本次真正推送成功**的文档移出待上行清单。
+           * 全清是错的：若本轮没推送任何文档（例如还没写入），
+           * 全清会把上一轮遗留的未同步标记一并抹掉，掩盖真实风险。
+           */
+          const pushed = new Set(
+            (r?.docs ?? []).map((d) => d?._id ?? d?.id).filter(Boolean),
+          );
+          if (pushed.size) await clearPending(pushed);
+          else await recountPending();      // 没推任何文档时，顺带确认清单是否本就为空
+          state.lastError = null;
+        }
+        push = { docs: r?.docs ?? [] };
+        emit();
+
+        try {
+          const p = await state.db.replicate.from(REMOTE, { batch_size: 50, retry: false });
+          const pullErr = p?.errors?.length ?? 0;
+          if (pullErr) state.lastError = `下载失败 ${pullErr} 条`;
+          state.lastSyncAt = new Date();
+          pull = p;
+        } catch (e) {
+          state.lastError = `下载失败：${e.message}`;
+        }
+        emit();
+
+        // pull 会把服务端序列号写进检查点；下一轮 push 之前必须清掉，
+        // 否则又会污染 push 的判断（这是上面那段注释描述的问题的防线）
+        await resetReplicationCheckpoints();
+      }
+
+      /**
+       * 移出待上行清单。
+       *
+       * hub 那条路在 hubPush() 内部已经按"真正成功"处理了（带乐观并发校验），
+       * 所以这里只处理 CouchDB 那套之外的公共收尾。
+       */
+      if (transport === 'hub' && push?.pushedIds?.size) {
+        await clearPending(push.pushedIds);
+      }
 
       // 清掉"已无权查看"的本地残留（换使用者 / 权限收紧后必须做）
       await purgeUnauthorizedLocals();

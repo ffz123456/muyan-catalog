@@ -27,47 +27,17 @@
  */
 import { couchAs, canSeeAll } from './auth.mjs';
 import { DB } from './couch.mjs';
+import {
+  isOrderId, isSystemDoc, canRead, rejectForbidden,
+} from './authz.mjs';
 
-const isOrderId = (id) => typeof id === 'string'
-  && (id.startsWith('order:') || id.startsWith('orderrev:'));
-
-/** R4：系统文档不外发。 */
-const isSystemDoc = (id) => typeof id === 'string' && id.startsWith('_');
-
-/** 该身份能否读这个文档。 */
-function canRead(doc, sales) {
-  if (!doc) return false;
-  const id = doc._id ?? doc.id;
-
-  /**
-   * ⚠️ `_local/*` 必须放行，不能当成"系统文档"挡掉。
-   *
-   * 实测踩过：PouchDB 用 `_local/<hash>` 存放**复制检查点**。
-   * 挡掉它会让客户端读不到自己的检查点，整个复制无法推进——
-   * 表现为订单反复推不上去、界面一直显示"未同步"。
-   * `_local` 文档不参与复制、只存在于服务端，放行不泄露任何业务数据。
-   */
-  if (typeof id === 'string' && id.startsWith('_local/')) return true;
-
-  if (isSystemDoc(id)) return false;
-  if (canSeeAll(sales)) return true;
-  if (!isOrderId(id)) return true;                 // R3：产品等共享
-  return doc.sales_id === sales.name;              // R1
-}
-
-/** 校验一批待写文档是否越权；返回被拒的项（供响应里回报错误）。 */
-function rejectForbidden(docs, sales) {
-  if (canSeeAll(sales)) return [];
-  return docs
-    .map((d, i) => ({ d, i }))
-    .filter(({ d }) => isOrderId(d._id) && d.sales_id !== sales.name)
-    .map(({ d, i }) => ({
-      id: d._id,
-      error: 'forbidden',
-      reason: `订单的 sales_id 必须是你本人：期望 ${sales.name}，实际 ${d.sales_id ?? '(缺失)'}`,
-      _index: i,
-    }));
-}
+/**
+ * 授权规则**统一在 authz.mjs**，这里不再重复定义。
+ *
+ * 原因：这个项目有两种同步实现——本文件（CouchDB 代理版）和
+ * hubsync.mjs（自研中心版）。两边各写一套授权，迟早会走样，
+ * 而**授权走样是安全事故**，不会有任何报错提示。
+ */
 
 /**
  * 处理同步代理请求。

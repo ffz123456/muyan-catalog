@@ -890,6 +890,15 @@ async function loadAll() {
   // 能力探测失败不该影响主流程（比如离线时）——失败就保持 null，界面按原样
   try {
     state.capabilities = await api.get('/api/capabilities');
+    /**
+     * 按服务端能力选同步传输方式。
+     *
+     *   'hub'   中心自带存储，走 /api/hub/*
+     *   'couch' 有 CouchDB，走复制协议代理 /api/sync/*
+     *
+     * 老版本服务端不返回 syncMode——那种情况按 'couch' 走（保持原行为）。
+     */
+    sync.setTransport(state.capabilities?.syncMode ?? 'couch');
   } catch { /* 忽略 */ }
   state.viewer = sessionRes.sales ?? null;
   state.signedIn = !!sessionRes.signedIn;
@@ -1396,6 +1405,8 @@ async function boot() {
     await loadSolo();
     await refreshOrdersFromLocal();       // 订单本来就存在本地
   } else {
+    // 单人模式没有服务端，也就没有传输层可言
+    sync.setTransport(backend.capabilities()?.syncMode ?? 'couch');
     await loadAll();
     // 周期性兜底同步：销售不会手动点，得自己跑
     setInterval(() => {
