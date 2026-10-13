@@ -126,15 +126,25 @@ async function main() {
   /**
    * 康熙部首检查（U+2E80–U+2FDF）。
    *
-   * 容器里用 Chromium 生成时，「人白木几示寸」会被写成康熙部首，
-   * 字形看着一样但复制/搜索失效。这条走本机浏览器，应当没有。
+   * ⚠️ 实测结论：**这是 Linux 容器里 Chromium 的问题，不是某条驱动的问题。**
+   *   · Windows + 浏览器命令行（团队版中心的目标形态）→ 干净，无部首
+   *   · Linux 容器 + puppeteer  → 有部首（25 个，产品名 0/5 命中）
+   *   · Linux 容器 + 命令行     → 同样有部首
+   *   也就是说容器里两条驱动都中招。所以在容器里跑这个套件，
+   *   这一项会（也应该）失败——那是在如实报告平台的缺陷，不是脚本的问题。
+   *
+   *   影响范围：只影响 Docker/Linux 部署。销售用的「打印为 PDF」不受影响
+   *   （用他自己设备上的浏览器与字体）。
    */
   const kangxi = [...chars].filter((c) => {
     const cp = c.charCodeAt(0);
     return cp >= 0x2e80 && cp <= 0x2fdf;
   });
   s.check('没有把汉字写成康熙部首', kangxi.length === 0,
-    kangxi.length ? `${kangxi.length} 个：${kangxi.slice(0, 10).join('')}` : '干净');
+    kangxi.length
+      ? `${kangxi.length} 个：${kangxi.slice(0, 10).join('')}`
+        + '（Linux 容器里 Chromium 的已知缺陷；Windows 上没这个问题）'
+      : '干净');
 
   s.check('产品图片已嵌入', /\/Subtype\s*\/Image/.test(raw));
 
