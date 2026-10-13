@@ -82,3 +82,10 @@ windows/hub/sea-config.json
 
 .commitmsg.txt
 
+
+# Windows 打包产物（可重建，368 MB 不适合入库）
+windows/dist/
+windows/hub/_*/
+
+.cm.txt
+
