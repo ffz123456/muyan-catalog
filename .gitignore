@@ -63,3 +63,7 @@ debug.log
 # --- Scratch space ---
 # Commit-message files and other one-off junk go here.
 .tmp/
+
+# Release 打包产物
+*.zip
+

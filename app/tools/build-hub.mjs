@@ -32,7 +32,46 @@ const HUB = path.join(ROOT, 'windows', 'hub');
 const DIST = path.join(ROOT, 'windows', 'dist', '木言');
 
 const WITH_BROWSER = process.argv.includes('--with-browser');
-const NODE_EXE = process.env.BUILD_NODE_EXE || 'C:\\nodejs\\node.exe';
+
+/**
+ * 用哪个 node 去编译 SEA。
+ *
+ * ⚠️ 别再硬编码机器上的路径。原来写的是 `C:\nodejs\node.exe`——
+ *    在我这台机器上没问题，但**在任何别的机器（包括 CI）上都不存在**，
+ *    于是打包脚本只能在一个人手上跑。
+ *
+ * SEA 的要求是"把一个 node 可执行文件复制一份、把 blob 注进去"，
+ * 所以**当前正在跑的这个 node 就是最正确的候选**（版本必然匹配）。
+ * 允许用 BUILD_NODE_EXE 覆盖，那只是给"想用另一个版本编"的人留的口子。
+ */
+function resolveNodeExe() {
+  const fromEnv = process.env.BUILD_NODE_EXE;
+  if (fromEnv && fs.existsSync(fromEnv)) return { path: fromEnv, why: 'BUILD_NODE_EXE 指定' };
+
+  /**
+   * process.execPath 是当前进程的可执行文件。
+   *
+   * ⚠️ 判断它"是不是 node"不能只靠正则匹配路径结尾——
+   *    我第一版用 /node(\.exe)?$/i 判，结果对 `C:\nodejs\node.exe`
+   *    返回 false（被我自己的转义搞错了），于是悄悄退回硬编码路径。
+   *    在 CI 上那条路径不存在，就会以"找不到 node"失败。
+   *    现在改成看**文件名（不含扩展名）**，直观且不会被转义坑。
+   */
+  const self = process.execPath;
+  const base = path.basename(self).replace(/\.exe$/i, '').toLowerCase();
+  if (base === 'node' && fs.existsSync(self)) {
+    return { path: self, why: '当前运行的 node（process.execPath）' };
+  }
+
+  // 少数宿主（例如 Electron 打包的进程）execPath 不是 node；找一个能用的
+  for (const guess of ['C:\\nodejs\\node.exe', '/usr/bin/node', '/usr/local/bin/node']) {
+    if (fs.existsSync(guess)) return { path: guess, why: `常见路径回退（${guess}）` };
+  }
+  return null;
+}
+
+const nodePick = resolveNodeExe();
+const NODE_EXE = nodePick?.path ?? null;
 const POSTJECT = path.join(APP, 'node_modules', 'postject', 'dist', 'cli.js');
 
 const problems = [];
@@ -43,8 +82,13 @@ const step = (m) => console.log(`  ${m}`);
  * ------------------------------------------------------------------ */
 
 async function buildExe() {
-  if (!fs.existsSync(NODE_EXE)) {
-    problems.push(`找不到 Node 可执行文件：${NODE_EXE}（可用 BUILD_NODE_EXE 指定）`);
+  if (!NODE_EXE) {
+    problems.push(
+      '找不到可用来编译的 node 可执行文件。\n'
+      + '     SEA 需要一个 node 二进制来"复制+注入"，正常情况下会自动用当前这个 node。\n'
+      + '     如果你是从别的宿主进程里调用的，请显式指定：\n'
+      + '         $env:BUILD_NODE_EXE = "C:\\path\\to\\node.exe"',
+    );
     return null;
   }
   if (!fs.existsSync(POSTJECT)) {
@@ -264,6 +308,7 @@ await fsp.mkdir(DIST, { recursive: true });
 
 const exe = await buildExe();
 if (exe) {
+  step(`用 ` + nodePick.why + ` 编译`);
   step(`已编译 exe（${Math.round(fs.statSync(exe).size / 1024 / 1024)} MB）`);
   await copyApp();
   const hasBrowser = await copyBrowser();

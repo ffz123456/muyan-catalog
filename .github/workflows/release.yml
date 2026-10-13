@@ -1,0 +1,171 @@
+name: 发布
+
+# 打 tag 就自动构建产物并挂到 Release 上。
+#
+# 用法：git tag v1.0.0 && git push origin v1.0.0
+# 然后 GitHub 会自动创建 Release 并把两个产物附上去。
+#
+# 为什么要有它：
+#   手工打包上传有两个问题——
+#     1. 打包步骤容易漏（比如忘了 --with-browser）
+#     2. 产物的来源无法追溯：谁都能往 Release 里丢一个来路不明的文件
+#   自动化之后，Release 里的东西**一定是某个 tag 构建出来的**。
+#
+# 为什么不把带浏览器的版本（368 MB）也发上来：
+#   GitHub 单文件上限 100 MB、Release 总容量也有限。
+#   而且那 280 MB 里绝大部分是 Chromium，只影响"服务端出画册 PDF"，
+#   而「打印为 PDF」在手机上一样能用、效果相同。
+#   需要离线出 PDF 的人可以自己跑 build-hub.mjs --with-browser。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # 上传 Release 资产需要
+
+jobs:
+  # ------------------------------------------------------------------
+  # 单机版：一个 HTML 文件。与平台无关，用 Linux 跑更快。
+  # ------------------------------------------------------------------
+  solo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 生成 PouchDB 浏览器构建
+        run: cd app && node tools/vendor-pouchdb.mjs
+
+      - name: 打包单机版
+        run: cd app && node tools/build-solo.mjs
+
+      # 打包器是"拼接 + 改名"，出错方式是**静默的**：
+      # 产物照样能加载，只是某些功能引用了不存在的名字。
+      # 所以必须检查内嵌脚本的语法。
+      - name: 检查产物
+        run: |
+          cd app
+          node tools/check-inline-js.mjs 'dist/木言-单机版.html'
+          node tools/check-encoding.mjs .
+          ls -lh dist/
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: solo
+          path: app/dist/木言-单机版.html
+
+  # ------------------------------------------------------------------
+  # 团队版中心：编译成 Windows 可执行文件。**必须在 Windows 上构建**。
+  # ------------------------------------------------------------------
+  hub:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # SEA 需要一个 node 二进制来"复制 + 注入"，postject 负责注入。
+      # 不用 --no-save：build-hub 会去 app/node_modules 里找它。
+      - name: 安装打包工具
+        run: cd app && npm install --no-audit --no-fund postject
+
+      - name: 生成 PouchDB 浏览器构建
+        run: cd app && node tools/vendor-pouchdb.mjs
+
+      # 不带 --with-browser：省 280 MB，且不依赖在 CI 里下载 Chromium。
+      # 没有浏览器时「服务端出 PDF」不可用，界面会自动引导用「打印为 PDF」。
+      - name: 打包团队版中心
+        run: cd app && node tools/build-hub.mjs
+
+      - name: 检查产物
+        shell: pwsh
+        run: |
+          $pkg = 'windows/dist/木言'
+          if (-not (Test-Path "$pkg/木言-服务端.exe")) { throw '缺少服务端 exe' }
+          if (-not (Test-Path "$pkg/启动.cmd")) { throw '缺少启动脚本' }
+          if (-not (Test-Path "$pkg/app/server/index.mjs")) { throw '缺少应用代码' }
+          $sz = [math]::Round((Get-ChildItem $pkg -Recurse -File | Measure-Object -Property Length -Sum).Sum/1MB, 1)
+          Write-Host "  包大小：$sz MB"
+          if ($sz -lt 50) { throw "包太小（$sz MB），多半没打全" }
+
+      # 打成 zip：Release 里发文件夹不方便，用户解压即用
+      - name: 压缩
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'windows/dist/木言/*' -DestinationPath '木言-团队版中心.zip' -Force
+          $sz = [math]::Round((Get-Item '木言-团队版中心.zip').Length/1MB, 1)
+          Write-Host "  zip 大小：$sz MB"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub
+          path: 木言-团队版中心.zip
+
+  # ------------------------------------------------------------------
+  # 建 Release 并附上两个产物
+  # ------------------------------------------------------------------
+  release:
+    needs: [solo, hub]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 列出将发布的文件
+        run: find artifacts -type f -exec ls -lh {} \;
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/solo/木言-单机版.html
+            artifacts/hub/木言-团队版中心.zip
+          draft: false
+          # 说明正文由 Release 页面手动填（或用 tag 注释）。
+          # 这里只负责把产物挂上去——**产物的来源可追溯**才是这一步的价值。
+          generate_release_notes: true
+          body: |
+            ## 下载哪个
+
+            | 你的情况 | 下这个 |
+            |---|---|
+            | **一个人用** | `木言-单机版.html` —— 发到手机上，用浏览器打开就能用。不需要服务器、不需要网络、不装任何东西 |
+            | **几个人共享订单** | `木言-团队版中心.zip` —— 解压到一台能常开的电脑上，双击 `启动.cmd`，把网址发给销售 |
+
+            ### 单机版怎么用
+
+            把 `.html` 文件发到手机上（微信、网盘都行）→ 用**浏览器**打开 → 添加到主屏幕。
+
+            > ⚠️ 数据存在手机浏览器里。**请定期在「设置」里导出备份**——
+            > 清理浏览器数据或换手机会丢。
+
+            ### 团队版中心怎么用
+
+            解压（**不要在压缩包里直接运行**）→ 双击 `启动.cmd` →
+            把窗口里显示的网址发给销售。**那个窗口不要关。**
+
+            首次启动会在窗口里显示每个账号的初始密码，**只显示一次**。
+
+            > 这个包**不含浏览器**，所以「服务端生成画册」不可用——
+            > 用「打印为 PDF」即可，手机上一样能用、效果相同。
+            > 需要离线出 PDF 的话，自己跑 `node tools/build-hub.mjs --with-browser`。
+
+            ### 没有网络能不能用
+
+            单机版完全不需要网络。团队版中心在**局域网**内可用；
+            销售要在外面也能连上，需要 Tailscale 之类打通网络，见 `windows/HUB.md`。
+
+            ---
+
+            详细说明见 [README](https://github.com/ffz123456/muyan-catalog#readme)。
