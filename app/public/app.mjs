@@ -9,6 +9,8 @@
  *   删除走**软删除**（硬删除会让服务端过滤丢弃该变更，其它设备残留幽灵单）
  */
 import * as sync from './syncdb.mjs';
+import * as backend from './backend.mjs';
+import { renderCatalogHtml } from './../shared/catalog.mjs';
 
 /* ------------------------------ 工具 ------------------------------ */
 
@@ -104,6 +106,8 @@ const state = {
   syncInfo: sync.snapshot(),
   /** 服务端能力探测结果（例如有没有浏览器能出 PDF）。见 applyServerPdfCapability */
   capabilities: null,
+  /** 单人模式：连不上服务端，本机就是全部。见 backend.mjs 与 loadSolo() */
+  solo: false,
 };
 
 /* ------------------------------ 同步状态 ------------------------------ */
@@ -580,9 +584,28 @@ async function previewInBrowser() {
   if (!win) return toast('浏览器拦截了新窗口，请允许后重试', true);
   win.document.write('<p style="font-family:sans-serif;padding:24px">正在生成画册…</p>');
   try {
-    const { html } = await api.send('/api/catalog/preview', 'POST', {
-      productIds: ids, groupByCategory: $('#cbGroup').checked,
-    });
+    /**
+     * 单人模式下**在浏览器里直接排版**，不请求服务端。
+     *
+     * 用的是和团队模式同一份渲染器（app/shared/catalog.mjs），
+     * 所以两边印出来的画册完全一致。
+     * 图片通过 backend.imageToDataUri 取——本机附件或服务端图片，都行。
+     *
+     * 这条路**没有服务端生成 PDF 的那个汉字编码缺陷**：
+     * 打印用的是用户自己设备上的浏览器与字体。
+     */
+    const products = state.products.filter((p) => ids.includes(p.id));
+    const html = (state.solo || !backend.isOnline())
+      ? await renderCatalogHtml({
+        products,
+        settings: state.settings,
+        groupByCategory: $('#cbGroup').checked,
+        resolveImage: (ref) => backend.imageToDataUri(ref),
+      })
+      : (await api.send('/api/catalog/preview', {
+        productIds: ids, groupByCategory: $('#cbGroup').checked,
+      })).html;
+
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -683,6 +706,24 @@ const isAdmin = () => !!state.viewer?.admin;
  *    会让按 sales_id 的订单隔离失效。换身份一律走登录。
  */
 function renderAccounts() {
+  /**
+   * 单人模式没有"账号"这件事——本机就是使用者本人。
+   * 账号管理、同事名单、备份之外的设置都该藏起来。
+   *
+   * ⚠️ 这个判断必须在**这里**做，不能只在 applySoloChrome() 里做：
+   *    renderAccounts() 会在每次数据加载后被调用，
+   *    它会把按钮重新显示出来，覆盖掉之前的隐藏（实测踩到）。
+   */
+  if (state.solo) {
+    $('#btnAddAccount').hidden = true;
+    $('#salesAdminHint').hidden = true;
+    $('#salesHint').hidden = true;
+    $('#salesList').hidden = true;
+    const head = $('#salesList')?.previousElementSibling;
+    if (head) head.hidden = true;
+    return;
+  }
+
   const admin = isAdmin();
   $('#btnAddAccount').hidden = !admin;
   $('#salesAdminHint').hidden = !admin;
@@ -760,9 +801,82 @@ function showOncePassword(pw) {
 
 /* ------------------------------ 加载与绑定 ------------------------------ */
 
+/**
+ * 单人模式：没有服务端，本机就是全部。
+ *
+ * 用一个固定的本机身份（登录名 local），这样订单的 sales_id
+ * 语义和团队模式完全一致——将来同步到服务器时不用改数据。
+ */
+async function loadSolo() {
+  state.solo = true;
+  state.products = await backend.listProducts();
+  state.settings = await backend.getSettings();
+  state.capabilities = { serverPdf: { available: false } };
+
+  state.sales = [{ name: 'local', display: '我', admin: true, active: true }];
+  state.viewer = state.sales[0];
+  state.signedIn = true;              // 单机模式不需要登录
+  state.scope = 'all';
+  state.selected = new Set(state.products.map((p) => p.id));
+
+  $('#loginGate').hidden = true;
+  applySoloChrome();
+
+  renderViewer();
+  renderProducts();
+  renderPickList();
+  renderSettings();
+}
+
+/**
+ * 单人模式下调整界面文案与可见项。
+ *
+ * 要让用户一眼看出"这台手机自己就是全部"，而不是以为"连不上服务器、坏了"。
+ * 措辞上避免"离线""失败"这类词——单机是正常用法，不是故障。
+ */
+function applySoloChrome() {
+  const note = $('#soloNote');
+  if (note) note.hidden = false;
+  document.body.classList.add('is-solo');
+
+  // 单人模式没有"同步"这件事，隐藏同步状态芯片
+  const chip = $('#syncChip');
+  if (chip) chip.hidden = true;
+
+  // 账号相关的显示由 renderAccounts() 负责（它每次加载都会跑，
+  // 在这里设会被覆盖掉）。这里只管备份入口。
+  for (const id of ['backupSep', 'backupHead', 'backupBox']) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = false;
+  }
+  refreshUsageText();
+}
+
+/** 显示本地占用了多少空间，让用户心里有数。 */
+async function refreshUsageText() {
+  const el = $('#usageText');
+  if (!el) return;
+  try {
+    const u = await backend.usage();
+    if (!u) { el.textContent = ''; return; }
+    el.textContent = `本机已存 ${u.docs} 条记录，约占用 ${u.mb} MB。`;
+  } catch { el.textContent = ''; }
+}
+
+/**
+ * 按当前模式重新加载数据。
+ *
+ * 为什么要有它：界面里很多地方改完数据要刷新，但两种模式的刷新方式不同
+ * （团队要重新拉服务端、单人是重读本地）。有一个统一入口，
+ * 就不会出现"某个按钮在单机模式下没刷新"这种漏。
+ */
+async function reloadData() {
+  if (state.solo) await loadSolo();
+  else await loadAll();
+}
+
 async function loadAll() {
-  // 订单不再从服务端读列表：改为读**本地库**（离线可用），
-  // 服务端只提供身份、产品与设置。
+  // 团队模式：订单读**本地库**（离线可用），服务端提供身份、产品与设置
   const [prodRes, setRes, salesRes, sessionRes] = await Promise.all([
     api.get('/api/products'),
     api.get('/api/settings'),
@@ -950,9 +1064,11 @@ function bind() {
     if (!file) return;
     try {
       const dataUrl = await compressImage(file);
-      const saved = await api.send('/api/images', 'POST', { dataUrl });
+      // 走 backend：团队模式存服务端，单人模式存本机附件
+      const blob = await (await fetch(dataUrl)).blob();
+      const saved = await backend.saveImage(blob, file.name || 'photo.jpg');
       state.pendingPhoto = saved.id;
-      setPhotoPreview(`/assets/${saved.id}`);
+      setPhotoPreview(await backend.imageToDataUri(saved.id));
       toast(`图片已就绪（${saved.sizeKB} KB）`);
     } catch (err) { toast(err.message, true); }
   });
@@ -977,9 +1093,9 @@ function bind() {
     };
     if (!body.name) return toast('请填写产品名称', true);
     try {
-      await api.send('/api/products', 'POST', body);
+      await backend.saveProduct(body);
       closeProductSheet();
-      await loadAll();
+      await reloadData();
       toast('已保存');
     } catch (err) { toast(err.message, true); }
   });
@@ -989,9 +1105,9 @@ function bind() {
     if (!id) return;
     if (!confirm('确定删除这个产品？')) return;
     try {
-      await api.send(`/api/products/${encodeURIComponent(id)}`, 'DELETE');
+      await backend.deleteProduct(id);
       closeProductSheet();
-      await loadAll();
+      await reloadData();
       toast('已删除');
     } catch (err) { toast(err.message, true); }
   });
@@ -1013,7 +1129,7 @@ function bind() {
     e.preventDefault();
     const f = e.target;
     try {
-      state.settings = await api.send('/api/settings', 'POST', {
+      state.settings = await backend.saveSettings({
         companyName: f.elements.companyName.value.trim(),
         tagline: f.elements.tagline.value.trim(),
         contact: f.elements.contact.value.trim(),
@@ -1031,15 +1147,76 @@ function bind() {
     if (!file) return;
     try {
       const dataUrl = await compressImage(file, { maxEdge: 600, quality: 0.9 });
-      const saved = await api.send('/api/images', 'POST', { dataUrl });
-      state.settings = await api.send('/api/settings', 'POST', { logo: saved.id });
+      const blob = await (await fetch(dataUrl)).blob();
+      const saved = await backend.saveImage(blob, file.name || 'logo.png');
+      state.settings = await backend.saveSettings({ logo: saved.id });
       renderSettings();
       toast('Logo 已保存');
     } catch (err) { toast(err.message, true); }
   });
   $('#btnLogoClear').addEventListener('click', async () => {
-    state.settings = await api.send('/api/settings', 'POST', { logo: null });
+    state.settings = await backend.saveSettings({ logo: null });
     renderSettings();
+  });
+
+  /* ---- 备份（单人模式下必需）----
+   *
+   * 数据只在浏览器里，清理浏览器数据 / 换手机 / 系统回收存储都会丢。
+   * 没有导出这一条，这东西不能用来存真的生意。
+   */
+  $('#btnExport').addEventListener('click', async () => {
+    const btn = $('#btnExport');
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '正在打包…';
+    try {
+      const backup = await backend.exportAll();
+      const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `家具工具备份-${stamp}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast(`已导出（${backup.products.length} 款产品）`);
+    } catch (err) {
+      toast(`导出失败：${err.message}`, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+
+  $('#btnImport').addEventListener('click', () => $('#importInput').click());
+  $('#importInput').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const localCount = state.products.length;
+      const incoming = backup.products?.length ?? 0;
+
+      /**
+       * 合并而不是覆盖。
+       *
+       * 用户点"恢复"通常是"把这台手机补齐"，不是"把本机清空"。
+       * 覆盖会静默丢掉本机新拍的产品——那是最难发现、最伤人的那种数据丢失。
+       */
+      const msg = localCount
+        ? `本机现有 ${localCount} 款产品，备份里有 ${incoming} 款。\n\n`
+          + '确定合并？\n（同一个产品的会以备份里的为准，本机独有的会保留）'
+        : `备份里有 ${incoming} 款产品，导入到这台设备？`;
+      if (!confirm(msg)) return;
+
+      const r = await backend.importAll(backup);
+      await reloadData();
+      toast(`已恢复 ${r.products} 款产品`);
+    } catch (err) {
+      toast(`恢复失败：${err.message}`, true);
+    }
   });
   /* ---- 同步状态：点一下立即同步 ---- */
   $('#syncChip').addEventListener('click', async () => {
@@ -1196,7 +1373,7 @@ async function boot() {
       state.syncInfo = info;
       renderSyncChip();
       // 同步完成后刷新列表与未同步提示
-      if (!info.syncing && state.signedIn) {
+      if (!info.syncing && state.signedIn && !state.solo) {
         refreshOrdersFromLocal().catch(() => {});
       }
     });
@@ -1206,12 +1383,25 @@ async function boot() {
   }
 
   bind();
-  await loadAll();
 
-  // 周期性兜底同步：销售不会手动点，得自己跑
-  setInterval(() => {
-    if (state.signedIn) sync.sync().catch(() => {});
-  }, 30000);
+  /**
+   * 自动判断运行形态：连得上服务端就是团队，连不上就是单人。
+   *
+   * **不让用户选**——那等于让他理解一个他不需要理解的概念。
+   * 而且单人模式是完全正常的用法，不是"降级"，
+   * 所以界面上也不能出现"连接失败"这类字眼。
+   */
+  await backend.probe();
+  if (backend.isSolo()) {
+    await loadSolo();
+    await refreshOrdersFromLocal();       // 订单本来就存在本地
+  } else {
+    await loadAll();
+    // 周期性兜底同步：销售不会手动点，得自己跑
+    setInterval(() => {
+      if (state.signedIn) sync.sync().catch(() => {});
+    }, 30000);
+  }
 }
 
 boot().catch((e) => toast(`加载失败：${e.message}`, true));

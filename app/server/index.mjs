@@ -541,6 +541,28 @@ async function serveStatic(req, res, url) {
     }
   }
 
+  /**
+   * 共享模块（app/shared/）。
+   *
+   * 画册排版逻辑是服务端与浏览器**共用**的一份，浏览器要能直接 import 它。
+   * 它不在 public/ 下（那样服务端就得从 public 里 import，目录关系更乱），
+   * 所以这里单独开一条只读路由。
+   *
+   * ⚠️ 只允许 .mjs，且限制在 shared 目录内——别把整个 app 源码暴露出去。
+   */
+  if (rel.startsWith('/shared/')) {
+    const sub = rel.slice('/shared/'.length);
+    if (!/^[\w.-]+\.mjs$/.test(sub)) return fail(res, 403, '非法路径');
+    const file = safeJoin(path.join(HERE, '..', 'shared'), sub);
+    if (!file) return fail(res, 403, '非法路径');
+    try {
+      const buf = await fs.readFile(file);
+      return send(res, 200, buf, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    } catch {
+      return fail(res, 404, '模块不存在');
+    }
+  }
+
   if (rel === '/') rel = '/index.html';
   const file = safeJoin(PUBLIC_DIR, rel);
   if (!file) return fail(res, 403, '非法路径');

@@ -28,6 +28,16 @@
   </nav>
 </header>
 
+<!--
+  单人模式提示条。
+  刻意**不出现**"离线""连接失败""未登录"这类词——
+  单机使用是完全正常的形态，不是故障。用户看到"失败"会以为坏了。
+-->
+<div class="solo-note" id="soloNote" hidden>
+  📱 <strong>本机模式</strong>：产品、画册、订单都存这台设备上，不需要联网。
+  <span class="solo-warn">记得定期在「设置」里导出备份。</span>
+</div>
+
 <!-- 未登录时遮住全部界面：没有身份就没有 sales_id，出的单无处归属 -->
 <div class="login" id="loginGate" hidden>
   <div class="login-box">
@@ -148,6 +158,23 @@
     你是管理者：可以新建账号、重置密码、停用离职人员。
     <strong>新建账号后请把初始密码当面告知本人</strong>——它只显示这一次。
   </p>
+
+  <!-- 备份：单人模式下这是必需的，不是可选功能 -->
+  <hr class="sep" id="backupSep" hidden>
+  <div class="panel-head" id="backupHead" hidden><div class="count">备份</div></div>
+  <div id="backupBox" hidden>
+    <p class="hint" id="backupHint">
+      <strong>数据存在这台设备上。</strong>
+      清理浏览器数据、换手机、或者系统回收存储，都会让它消失。
+      建议每周导出一次，存到微信收藏或网盘里。
+    </p>
+    <div class="row">
+      <button class="btn btn-primary" id="btnExport">导出备份</button>
+      <button class="btn" id="btnImport">从备份恢复</button>
+    </div>
+    <input type="file" id="importInput" accept=".json,application/json" hidden>
+    <p class="hint" id="usageText"></p>
+  </div>
 </section>
 
 </main>

@@ -476,7 +476,25 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 }
 .result a { color: var(--accent); font-weight: 600; }
 
-/* ---------------- 账号管理 ---------------- */
+/* ---------------- 单人模式 ---------------- */
+
+/*
+ * 本机模式提示条。
+ *
+ * 语气很重要：要让人觉得"这样用是正常的"，不是"出问题了"。
+ * 所以用中性的信息色，不用警告色；文案里也不出现"离线""失败"。
+ */
+.solo-note {
+  background: #f2f6f2; border-bottom: 1px solid #d8e4d8;
+  color: #3f5a3f; font-size: 13px; line-height: 1.5;
+  padding: 8px 14px; text-align: center;
+}
+.solo-note strong { color: #2f4a2f; }
+.solo-warn { color: #8a6a1f; }
+
+/* 单人模式没有同步芯片，隐藏后标题栏留白更自然 */
+body.is-solo .topbar { gap: 10px; }
+
 
 /* 状态标签：管理员 / 已停用 / 待改密 */
 .tag {
