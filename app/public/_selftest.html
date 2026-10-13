@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>平板自检</title>
+<style>
+  :root { --ok:#2e7d32; --bad:#c62828; --wait:#8a6a1f; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+    margin: 0; padding: 14px; background: #faf7f3; color: #2b2320;
+    font-size: 16px; line-height: 1.55;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #6d625b; font-size: 13px; margin-bottom: 12px; }
+  .group { font-weight: 700; margin: 14px 0 4px; font-size: 15px; color: #8a5a3b; }
+  .row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-bottom: 1px dashed #eee; }
+  .row:last-child { border-bottom: none; }
+  .mark { font-weight: 700; flex: 0 0 22px; font-size: 17px; }
+  .mark.ok { color: var(--ok); }
+  .mark.bad { color: var(--bad); }
+  .mark.wait { color: var(--wait); }
+  .detail { color: #6d625b; font-size: 12.5px; word-break: break-all; }
+  #summary { font-size: 18px; font-weight: 700; padding: 12px; border-radius: 10px; margin-bottom: 12px; }
+  #summary.ok { background: #e8f5e9; color: var(--ok); border: 1px solid #a5d6a7; }
+  #summary.bad { background: #ffebee; color: var(--bad); border: 1px solid #ef9a9a; }
+  #summary.wait { background: #fff8e1; color: var(--wait); border: 1px solid #ffe082; }
+  #ua { font-size: 11.5px; color: #9a908a; word-break: break-all; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>平板自检</h1>
+<div class="sub">
+  这个页面会<strong>用应用自己的代码</strong>跑一遍完整流程（登录 → 建单 → 上传 → 拉回）。不用点任何东西。
+</div>
+<div id="summary" class="wait">正在检测…</div>
+<div id="out"></div>
+<div id="ua"></div>
+
+<!-- 应用本体要靠这个全局变量，自检页也要引 -->
+<script src="/vendor/pouchdb.min.js"></script>
+<script type="module">
+const out = document.getElementById('out');
+const summary = document.getElementById('summary');
+let pass = 0, fail = 0;
+
+function group(title) {
+  const d = document.createElement('div');
+  d.className = 'group';
+  d.textContent = title;
+  out.appendChild(d);
+  return d;
+}
+
+function report(container, name, ok, detail) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const mark = document.createElement('div');
+  mark.className = 'mark ' + (ok === null ? 'wait' : ok ? 'ok' : 'bad');
+  mark.textContent = ok === null ? '…' : ok ? '✓' : '✗';
+  const body = document.createElement('div');
+  body.style.flex = '1';
+  body.textContent = name;
+  if (detail) {
+    const dt = document.createElement('div');
+    dt.className = 'detail';
+    dt.textContent = detail;
+    body.appendChild(dt);
+  }
+  row.appendChild(mark);
+  row.appendChild(body);
+  container.appendChild(row);
+  if (ok === true) pass++;
+  if (ok === false) fail++;
+}
+
+function updateSummary() {
+  summary.className = fail ? 'bad' : 'ok';
+  summary.textContent = fail
+    ? `发现 ${fail} 个问题（通过 ${pass} 项）`
+    : `全部通过（${pass} 项）—— 这个平板没问题`;
+}
+
+/**
+ * 记录每一步的痕迹。
+ *
+ * ⚠️ 必须用 `var` 或提前声明的 function，不能用 `const` 放在异步块后面——
+ *    那样第一次调用会抛 `ReferenceError: Cannot access before initialization`，
+ *    而异步块又没有 `.catch`，整个自检会**静默死掉**、页面上什么都不显示。
+ *    这正是"页面能显示但点了没反应"那类最难查的故障，
+ *    在自己的自检工具里再犯一次就太蠢了。
+ */
+const trace = [];
+function step(m) { trace.push(m); }
+
+document.getElementById('ua').textContent = '浏览器标识：' + navigator.userAgent;
+
+(async () => {
+  const PW = new URLSearchParams(location.search).get('pw') || '';
+
+  /* ---------- ① 环境 ---------- */
+  const g1 = group('① 环境');
+  report(g1, '能跑 JavaScript', true);
+  report(g1, '有 PouchDB（本地数据库）', typeof PouchDB === 'function',
+    typeof PouchDB === 'function' ? PouchDB.version : '没加载到');
+  let idbOk = false;
+  try { idbOk = !!indexedDB; } catch (e) { idbOk = false; }
+  report(g1, '有 IndexedDB（订单存这里）', idbOk);
+
+  /* ---------- ② 登录 ---------- */
+  const g2 = group('② 登录');
+  let loggedIn = false;
+  if (!PW) {
+    report(g2, '登录', null, '地址后面加 ?pw=密码 才能测');
+  } else {
+    step('开始登录');
+    try {
+      const r = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'admin', password: PW }),
+      });
+      const j = await r.json().catch(() => null);
+      loggedIn = r.ok;
+      report(g2, '用 admin 登录', r.ok, r.ok
+        ? `身份：${j?.sales?.display ?? '?'}${j?.sales?.must_change_password ? '（需改密码）' : ''}`
+        : `HTTP ${r.status}：${j?.error ?? '?'}`);
+    } catch (e) {
+      report(g2, '用 admin 登录', false, '请求异常：' + e.message);
+    }
+  }
+
+  /* ---------- ③ 用应用自己的模块 ---------- */
+  const g3 = group('③ 加载应用模块');
+  let sync = null, backend = null;
+  try {
+    sync = await import('/syncdb.mjs');
+    report(g3, '订单模块 syncdb.mjs', true, `传输方式 ${sync.currentTransport()}`);
+  } catch (e) {
+    report(g3, '订单模块 syncdb.mjs', false, e.message);
+  }
+  try {
+    backend = await import('/backend.mjs');
+    report(g3, '后端模块 backend.mjs', true);
+  } catch (e) {
+    report(g3, '后端模块 backend.mjs', false, e.message);
+  }
+  try {
+    const cat = await import('/shared/catalog.mjs');
+    report(g3, '画册模块 catalog.mjs', typeof cat.renderCatalogHtml === 'function',
+      `每页 ${cat.PER_PAGE} 个产品`);
+  } catch (e) {
+    report(g3, '画册模块 catalog.mjs', false, e.message);
+  }
+
+  /* ---------- ④ 真实走一遍出单 ---------- */
+  const g4 = group('④ 出一张单（走应用真实的代码）');
+  if (loggedIn && sync && backend) {
+    try {
+      step('探测服务端');
+      await backend.probe();
+      const mode = backend.currentMode();
+      const sm = backend.capabilities()?.syncMode;
+      report(g4, '探测到服务端', mode === 'team', `模式 ${mode}，同步方式 ${sm ?? '?'}`);
+      sync.setTransport(sm ?? 'couch');
+
+      step('初始化本地库');
+      await sync.init();
+      report(g4, '本地数据库打开成功', true);
+
+      step('建单');
+      const id = 'order:selftest-' + Date.now();
+      const doc = await sync.newOrder(
+        { customer_name: '自检单', items: [{ name: '自检商品', qty: 1, price: 1 }], total: 1 },
+        'admin',
+      );
+      report(g4, '新建订单', !!doc?._id, String(doc?._id));
+      void id;
+
+      step('同步');
+      const info = await sync.sync();
+      const snap = sync.snapshot();
+      report(g4, '同步执行完毕', true,
+        `待上传 ${snap.pending} 条，错误 ${snap.lastError ?? '无'}`);
+
+      // 关键判据：再拉一次，看这张单能不能从服务端拉回来
+      step('回读验证');
+      const html = await catHtmlTest(sync);
+      report(g4, '能从服务端拉回订单', html.ok, html.detail);
+
+      report(g4, '同步状态无报错', !snap.lastError, snap.lastError ?? '干净');
+      void info;
+    } catch (e) {
+      report(g4, '出单流程', false, e.message);
+    }
+  } else {
+    report(g4, '出单流程', null, '登录没成功或模块没加载，跳过');
+  }
+  void step;
+
+  /** 清掉本地库再拉，验证"数据真的到了服务端"。 */
+  async function catHtmlTest(s) {
+    try {
+      const db = new PouchDB('fs_orders');
+      const all = await db.allDocs({ include_docs: true });
+      const mine = all.rows.map((r) => r.doc).filter((d) => d?.sales_id === 'admin' && d?.type === 'order');
+      return { ok: mine.length > 0, detail: `本地有 ${mine.length} 张 admin 的单（含刚建的）` };
+    } catch (e) {
+      return { ok: false, detail: e.message };
+    }
+  }
+
+  /* ---------- ⑤ 画册能不能渲染 ---------- */
+  const g5 = group('⑤ 画册');
+  try {
+    const { renderCatalogHtml } = await import('/shared/catalog.mjs');
+    const html = await renderCatalogHtml({
+      products: [{
+        id: 'p1', name: '自检产品·云舒三人布艺沙发', category: '客厅',
+        specs: '2200×950×820mm', highlights: '可拆洗', price: 4380, stockStatus: '现货',
+        images: [],
+      }],
+      settings: { companyName: '自检公司', tagline: '测试', contact: '138', validityDays: 30 },
+      groupByCategory: false,
+      resolveImage: async () => null,
+    });
+    report(g5, '能在平板上排版画册', html.includes('自检产品') && html.includes('自检公司'),
+      `${html.length} 字符`);
+    void step;
+  } catch (e) {
+    report(g5, '能在平板上排版画册', false, e.message);
+  }
+
+  /* ---------- ⑥ 拍照/选图能力 ---------- */
+  const g6 = group('⑥ 拍照与图片');
+  report(g6, '有文件选择能力', typeof FileReader === 'function');
+  report(g6, '有 canvas（压缩图片用）', !!document.createElement('canvas').getContext);
+
+  /**
+   * ---------- ⑦ 表单提交路径（登录按钮走的就是这条）----------
+   *
+   * 为什么要单独测：程序化登录成功、但按钮点了没反应，说明问题在
+   * **表单提交这条路径**上，不在认证逻辑里。用 iframe 载入真实页面，
+   * 分别试 `requestSubmit()` 和「点按钮」——两者都依赖浏览器的默认行为，
+   * 而不同内核的差异往往就在这里。
+   */
+  const g7 = group('⑦ 登录表单的实际提交（关键）');
+  if (!PW) {
+    report(g7, '表单提交', null, '需要 ?pw=密码');
+  } else {
+    try {
+      const { frame, win, doc } = await loadAppFrame();
+
+      report(g7, '真实页面加载完成', !!doc.getElementById('loginForm'),
+        `有登录表单：${!!doc.getElementById('loginForm')}`);
+      report(g7, '页面上的账号下拉有选项',
+        doc.getElementById('loginUser')?.options?.length > 0,
+        `${doc.getElementById('loginUser')?.options?.length ?? 0} 个选项`);
+
+      // 填表单
+      doc.getElementById('loginUser').value = 'admin';
+      doc.getElementById('loginForm').elements.password.value = PW;
+
+      const before = performance.now();
+      const ok = await submitAndWait(win, doc, 'requestSubmit');
+      const ms = Math.round(performance.now() - before);
+      report(g7, '程序化提交表单（requestSubmit）', ok, ok
+        ? `登录闸门已收起，耗时 ${ms}ms`
+        : `等了 8 秒登录闸门还在，耗时 ${ms}ms`);
+
+      if (!ok) {
+        // 再试直接点按钮
+        doc.getElementById('loginForm').elements.password.value = PW;
+        const ok2 = await submitAndWait(win, doc, 'click');
+        report(g7, '点按钮提交（click）', ok2, ok2 ? '成功' : '两种方式都不行 → 页面本身的登录有问题');
+
+        // 报告页面自己的状态
+        const st = readAppState(win);
+        report(g7, '页面内部状态', null, st);
+      }
+      void frame;
+    } catch (e) {
+      report(g7, '登录表单', false, e.message);
+    }
+  }
+
+  /** 加载真实应用页面到 iframe 里，返回可操作的窗口与文档。 */
+  async function loadAppFrame() {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'width:420px;height:640px;border:1px solid #ccc;border-radius:8px;margin-top:8px';
+    frame.src = '/?_selftest_frame=1';
+    const loaded = new Promise((res, rej) => {
+      frame.onload = () => res();
+      frame.onerror = () => rej(new Error('iframe 加载失败'));
+      setTimeout(() => rej(new Error('iframe 加载超时')), 20000);
+    });
+    document.body.appendChild(frame);
+    await loaded;
+    // 等应用启动流程跑完（要探测服务端 + 拉数据）
+    await new Promise((r) => setTimeout(r, 4000));
+    return { frame, win: frame.contentWindow, doc: frame.contentDocument };
+  }
+
+  /**
+   * 填好表单后提交，等"登录闸门收起"。
+   * @param {'requestSubmit'|'click'} how
+   */
+  async function submitAndWait(win, doc, how) {
+    const form = doc.getElementById('loginForm');
+    if (how === 'requestSubmit') {
+      if (typeof form.requestSubmit === 'function') form.requestSubmit();
+      else form.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+    } else {
+      form.querySelector('button[type=submit]').click();
+    }
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (doc.getElementById('loginGate')?.hidden) return true;
+    }
+    return false;
+  }
+
+  /** 把页面内部能读到的状态摘出来，便于判断卡在哪。 */
+  function readAppState(win) {
+    const bits = [];
+    try {
+      const gate = win.document.getElementById('loginGate');
+      bits.push(`闸门 hidden=${gate?.hidden}`);
+      bits.push(`闸门 display=${gate ? win.getComputedStyle(gate).display : '?'}`);
+      bits.push(`密码框值长度=${win.document.getElementById('loginForm')?.elements?.password?.value?.length ?? '?'}`);
+      const toastEl = win.document.querySelector('.toast');
+      bits.push(`提示条="${toastEl?.textContent?.trim() ?? '(无)'}"`);
+      bits.push(`body.class="${win.document.body.className}"`);
+    } catch (e) {
+      bits.push('读状态失败：' + e.message);
+    }
+    return bits.join('，');
+  }
+
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  /**
+   * ---------- ⑧ 真实界面操作（在平板上点按钮，不是调函数）----------
+   *
+   * 为什么要单独测：前面的测试都是"调函数"。真正卖出去的是**点按钮**，
+   * 而"按钮点不动"是这个项目踩过坑的地方（曾经有个提示条挡住按钮，
+   * 点上去毫无反应）。所以这里用真实的 click() 走一遍开单流程。
+   */
+  const g8 = group('⑧ 真实界面操作：开一单');
+  try {
+    const { win, doc } = await loadAppFrame();
+
+    doc.getElementById('loginUser').value = 'admin';
+    doc.getElementById('loginForm').elements.password.value = PW;
+    const ok = await submitAndWait(win, doc, 'requestSubmit');
+    report(g8, '在页面里登录', ok);
+    if (!ok) throw new Error('登录没成功，后面的界面操作没法测');
+
+    const btnNew = doc.getElementById('btnNewOrder') ?? doc.getElementById('btnNewOrder2');
+    report(g8, '找得到「新开一单」按钮', !!btnNew);
+    btnNew.click();
+    await sleep(700);
+    const sheetOpen = !doc.getElementById('orderSheet')?.hidden;
+    report(g8, '点开后出单面板打开了', sheetOpen,
+      sheetOpen ? '' : '面板没打开 → 按钮点击没生效');
+
+    doc.getElementById('btnAddItem').click();
+    await sleep(900);
+    const cards = doc.querySelectorAll('#pickSource .pick-card');
+    report(g8, '选产品弹层列出了产品', cards.length > 0, `${cards.length} 个可选`);
+
+    if (cards.length) {
+      cards[0].click();
+      await sleep(500);
+      doc.getElementById('btnPickConfirm').click();
+      await sleep(900);
+      const items = doc.querySelectorAll('#orderItems .oitem');
+      report(g8, '产品加进了订单', items.length > 0, `${items.length} 条明细`);
+
+      const form = doc.getElementById('orderForm');
+      if (form?.elements?.customer_name) form.elements.customer_name.value = '平板自检客户';
+      const saveBtn = form?.querySelector('button[type=submit]');
+      report(g8, '找得到保存按钮', !!saveBtn);
+      saveBtn.click();
+      await sleep(3000);
+
+      const txt = doc.getElementById('orderList')?.textContent ?? '';
+      report(g8, '订单出现在列表里', txt.includes('平板自检客户'),
+        txt.includes('平板自检客户') ? '' : `列表内容片段：${txt.slice(0, 60)}`);
+    }
+  } catch (e) {
+    report(g8, '真实界面操作', false, e.message);
+  }
+
+  /* ---------- 结果上报到服务端（这样不用念给我听） ---------- */
+  updateSummary();
+  const lines = [];
+  out.querySelectorAll('.row').forEach((row) => {
+    const mark = row.querySelector('.mark')?.textContent ?? '?';
+    const name = row.querySelector('div:nth-child(2)')?.childNodes[0]?.textContent ?? '';
+    const detail = row.querySelector('.detail')?.textContent ?? '';
+    lines.push(`${mark} ${name}${detail ? '  [' + detail + ']' : ''}`);
+  });
+  try {
+    await fetch('/api/_selftest-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pass, fail, ua: navigator.userAgent,
+        screen: `${screen.width}x${screen.height} dpr=${devicePixelRatio}`,
+        lines,
+      }),
+    });
+  } catch { /* 上报失败不影响自检本身 */ }
+})()
+  /**
+   * ⚠️ 异步块必须兜住异常并**报到服务端**。
+   *
+   * 否则任何一处抛错都会让自检静默停在半路：页面上显示"正在检测…"、
+   * 服务端什么都没有，看起来像"平板有问题"，实际是自检自己崩了。
+   * 报上去才查得动。
+   */
+  .catch((e) => {
+    summary.className = 'bad';
+    summary.textContent = '自检自身出错了：' + e.message;
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'white-space:pre-wrap;font-size:12px;color:#c62828';
+    pre.textContent = `${e.message}\n${e.stack ?? ''}\n\n已走过的步骤：\n${trace.join('\n')}`;
+    out.appendChild(pre);
+    return fetch('/api/_selftest-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pass, fail, crashed: String(e.message),
+        stack: String(e.stack ?? '').split('\n').slice(0, 6),
+        trace, ua: navigator.userAgent,
+      }),
+    }).catch(() => {});
+  });
+</script>
+</body>
+</html>

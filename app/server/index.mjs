@@ -451,6 +451,26 @@ async function handleApi(req, res, url) {
    * 能力探测：界面据此决定「服务端生成」按钮是可用还是引导到「打印为 PDF」。
    * 前端不该靠猜——没有浏览器时点了按钮才报错，体验很差。
    */
+  /**
+   * 真机自检结果上报（仅用于联调）。
+   *
+   * 为什么要有它：平板上跑自检时，"屏幕上显示了什么"我这边看不到——
+   *   截屏在部分机型上不可用，也不能让用户逐条念。
+   *   让自检页把结果 POST 回来、写到文件里，就能直接读。
+   *
+   * **只在 FS_DEBUG_REQUESTS=1 时开放**：正常使用时这是个无用的写入口，
+   * 没有理由对外暴露。
+   */
+  if (p === '/api/_selftest-report' && req.method === 'POST') {
+    if (process.env.FS_DEBUG_REQUESTS !== '1') return fail(res, 404, '未开启');
+    const body = await readBody(req);
+    const file = path.join(TMP_DIR, 'selftest-report.json');
+    await fs.mkdir(TMP_DIR, { recursive: true });
+    await fs.writeFile(file, JSON.stringify({ at: new Date().toISOString(), ...body }, null, 2), 'utf-8');
+    console.log(`  [自检] 通过 ${body?.pass ?? '?'} / 失败 ${body?.fail ?? '?'} → ${file}`);
+    return send(res, 200, { ok: true });
+  }
+
   if (p === '/api/capabilities' && req.method === 'GET') {
     const { browserStatus } = await import('./browser.mjs');
     return send(res, 200, {
@@ -666,6 +686,22 @@ async function serveStatic(req, res, url) {
  * ------------------------------------------------------------------ */
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+
+  /**
+   * 请求日志（`FS_DEBUG_REQUESTS=1` 时开启）。
+   *
+   * 为什么需要它：真机联调时，"手机上点了没反应"是最难查的一类问题——
+   *   页面上没报错、服务端也没报错，因为**请求根本没发出来**。
+   *   有了这个日志就能一眼分清是"没发请求"还是"发了但失败了"。
+   *   默认关闭：正常使用时不该刷屏，也不该把访问记录留在控制台。
+   */
+  const debugReq = process.env.FS_DEBUG_REQUESTS === '1';
+  if (debugReq) {
+    res.on('finish', () => {
+      console.log(`  [请求] ${req.method} ${url.pathname} → ${res.statusCode}`);
+    });
+  }
+
   try {
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     return await serveStatic(req, res, url);

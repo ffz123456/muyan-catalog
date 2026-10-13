@@ -89,3 +89,9 @@ windows/hub/_*/
 
 .cm.txt
 
+
+# 真机联调的临时数据（含随机初始密码，绝不入库）
+windows/devtest/
+
+.m.txt
+
