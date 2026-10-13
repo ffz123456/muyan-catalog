@@ -98,11 +98,18 @@
   </label>
   <div id="pickList" class="list"></div>
   <div class="actionbar">
-    <button class="btn btn-lg" id="btnPreview">打印为 PDF</button>
-    <button class="btn btn-primary btn-lg" id="btnServerPdf">服务端生成</button>
+    <button class="btn btn-primary btn-lg" id="btnPreview">打印为 PDF</button>
+    <button class="btn btn-lg" id="btnServerPdf">服务端生成</button>
   </div>
   <p class="hint">
-    「打印为 PDF」→ 在弹出的打印窗口把目标选为「另存为 PDF」，什么都不用装，手机也能用。
+    <strong>推荐用「打印为 PDF」</strong>：在弹出的打印窗口把目标选为「另存为 PDF」，
+    什么都不用装，手机也能用，中文字体也没问题。
+  </p>
+  <p class="hint" id="serverPdfNote">
+    「服务端生成」在服务器上出 PDF。注意：在 Linux 服务器上生成时，
+    部分汉字（如「人」「白」「木」）会被写成异体码，导致
+    <strong>PDF 里的中文无法复制和搜索</strong>（显示看起来正常）。
+    对画册要求不高时可用；要发给客户正式用，建议用上面那条。
   </p>
   <div id="catalogResult"></div>
 </section>

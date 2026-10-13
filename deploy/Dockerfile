@@ -36,6 +36,9 @@ COPY app/package.json ./app/package.json
 COPY app/server ./app/server
 COPY app/public ./app/public
 COPY app/tools ./app/tools
+# shared/ 是服务端与浏览器**共用**的逻辑（画册排版等）。
+# 漏掉它会让画册接口直接 500 —— 实测踩过。
+COPY app/shared ./app/shared
 
 # 内置的示例图片素材（50 KB）。有了它，容器里执行种子数据也能种出带图的示例产品，
 # 否则第一次打开会是空列表——对"不想学"的用户，空白页等于"这东西坏了"。

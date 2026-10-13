@@ -19,6 +19,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { createSuite } from './assert-lib.mjs';
 
 const BASE = process.env.APP_URL || 'http://127.0.0.1:8080';
@@ -38,12 +39,51 @@ async function post(pathname, body) {
   return { status: res.status, body: parsed };
 }
 
-/** 从 PDF 字节里读字体信息（不引第三方库，直接找 PDF 结构）。 */
-function inspectPdf(buf) {
+/**
+ * 从 PDF 里读文字信息。
+ *
+ * ⚠️ **不要用"搜 /BaseFont 字符串"来判断字体是否嵌入**。
+ *    那个方法我试过两版，两版都误报：
+ *      1. 用 indexOf('endstream') 找流边界会找错（内容流里有重复字节）
+ *      2. 字体字典可能被放进压缩对象流，纯字节搜索看不到
+ *    结果是一份**中文完全正常**的 PDF 被判成"没嵌字体"。
+ *
+ * 改用确定性判据：**把 ToUnicode CMap 解出来，看能不能还原出产品名**。
+ * ToUnicode 是 PDF 规范里"字符码 → Unicode"的映射表，阅读器就是靠它
+ * 把字形还原成文字的。能还原出完整产品名 = 文字内容正确、可复制、可搜索。
+ * 这也正是当初证伪 pdf-catalog-generator 时用的方法。
+ */
+function inspectPdf(buf, needles = []) {
   const raw = buf.toString('latin1');
-  const fonts = [...raw.matchAll(/\/BaseFont\s*\/([A-Za-z0-9+\-,#]+)/g)].map((m) => m[1]);
+  const chars = new Set();
+
+  // 逐个流尝试解压，从 beginbfchar 段里收集字符
+  const re = /stream\r?\n/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf('endstream', start);
+    if (end < 0 || end - start > 3_000_000) continue;
+    let text = null;
+    for (const fn of [zlib.inflateSync, zlib.inflateRawSync]) {
+      try { text = fn(buf.subarray(start, end)).toString('latin1'); break; } catch { /* 下一个 */ }
+    }
+    if (!text || !/beginbfchar|beginbfrange/.test(text)) continue;
+    for (const mm of text.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]{4,})>/g)) {
+      for (let i = 0; i + 4 <= mm[2].length; i += 4) {
+        chars.add(String.fromCharCode(parseInt(mm[2].slice(i, i + 4), 16)));
+      }
+    }
+  }
+
+  const cjkCount = [...chars].filter((c) => c.charCodeAt(0) >= 0x4e00 && c.charCodeAt(0) <= 0x9fff).length;
+  const matched = needles.filter((n) => [...n].every((c) => chars.has(c)));
+
   return {
-    fonts: [...new Set(fonts)],
+    charCount: chars.size,
+    cjkCount,
+    charSamples: [...chars],
+    matchedNames: matched,
     hasToUnicode: /\/ToUnicode/.test(raw),
     hasImage: /\/Subtype\s*\/Image/.test(raw),
     pages: (raw.match(/\/Type\s*\/Page[^s]/g) ?? []).length,
@@ -99,17 +139,54 @@ async function main() {
       const buf = Buffer.from(await dl.arrayBuffer());
       await fs.writeFile(path.join(OUT, 'catalog.pdf'), buf);
 
-      const info = inspectPdf(buf);
-      s.info(`PDF 字体：${info.fonts.join(', ') || '(无)'}；页数 ${info.pages}`);
+      // 拿产品名当探针：能从 PDF 里还原出来，才说明中文真的写对了
+      let needles = [];
+      try {
+        const pl = await (await fetch(`${BASE}/api/products`)).json();
+        needles = (pl.products ?? []).map((p) => p.name).filter(Boolean);
+      } catch { /* 拿不到就退化为"只看汉字数量" */ }
+
+      const info = inspectPdf(buf, needles);
+      s.info(`PDF：还原出 ${info.charCount} 个字符（汉字 ${info.cjkCount}）；页数 ${info.pages}`);
 
       s.check('PDF 体积合理（>10KB）', buf.length > 10 * 1024, `${(buf.length / 1024).toFixed(0)} KB`);
       s.check('PDF 头正确', buf.subarray(0, 5).toString() === '%PDF-', buf.subarray(0, 8).toString());
-      s.check('嵌入了字体（不是全用默认字体）', info.fonts.length > 0, `${info.fonts.length} 种`);
       s.check('含 ToUnicode 映射（中文可复制可搜索）', info.hasToUnicode);
-      s.check('字体里有中文/CJK 字体',
-        info.fonts.some((f) => /YaHei|SimSun|SimHei|Noto|CJK|Song|Hei|Ming|DengXian|KaiTi|Arial Unicode/i.test(f)),
-        info.fonts.join(', '));
+      s.check('PDF 里能还原出汉字', info.cjkCount >= 20, `${info.cjkCount} 个汉字`);
+      // 产品名能否还原，由下面那条"汉字编码是否正确"覆盖——
+      // 这里不再单独断言，避免同一个缺陷报两遍
+      if (needles.length) s.info(`（探针产品名 ${needles.length} 个，命中情况见下面那条编码检查）`);
       s.check('产品图片已嵌入', info.hasImage);
+
+      /**
+       * ⚠️ 已知缺陷：Linux 容器里 Chromium 生成的 PDF，部分汉字会被写成
+       *    **康熙部首**（Kangxi Radicals，U+2F00–U+2FDF）而不是正常汉字。
+       *
+       *    实测：`人` → `⼈`、`白` → `⽩`、`木` → `⽊`、`几` → `⼏`、`示` → `⽰`。
+       *    码点系统性偏移 0x2E00。出错的字**正好都是康熙部首**。
+       *    字形显示看起来正常（Noto CJK 把它们画成同样的形状），
+       *    但**复制、搜索、检索全都失效**——对客户是不可见的坏掉。
+       *
+       *    已排除的原因：不是字体选择（试了 Noto Sans/Serif CJK、Noto Sans CJK JP、
+       *    系统默认 sans-serif，全都是同样 9 个字出错）、不是内联字体、不是启动参数。
+       *    判断是 Chromium 在 Linux 上生成 PDF 的问题。
+       *
+       *    影响范围：**只影响"服务端生成"这条路**。
+       *    「打印为 PDF」用的是用户自己设备上的浏览器与字体，不受影响——
+       *    那也正是我们推荐给销售的默认路径。
+       *
+       *    这里把它**显式测出来并报告**，而不是假装通过：
+       *    将来谁修好了，这条断言会告诉他。
+       */
+      const KANGXI = /[\u2E80-\u2FDF]/;
+      const kangxi = (info.charSamples ?? []).filter((c) => KANGXI.test(c));
+      if (kangxi.length) {
+        s.info(`⚠️ 检出 ${kangxi.length} 个康熙部首字符（服务端生成 PDF 的已知缺陷）：${kangxi.slice(0, 12).join('')}`);
+        s.check('（已知缺陷）服务端 PDF 的汉字编码正确', false,
+          '有汉字被写成康熙部首，复制/搜索会失效。改用「打印为 PDF」可规避。见本文件注释');
+      } else {
+        s.check('服务端 PDF 的汉字编码正确', true);
+      }
 
       const layoutOk = Array.isArray(made.body?.layout)
         && made.body.layout.every((p) => !p.overflowing);

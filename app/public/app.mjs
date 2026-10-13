@@ -622,18 +622,25 @@ async function serverPdf() {
  *   没有它时如果按钮看起来正常，用户点了才收到报错——
  *   对不懂技术的人是纯粹的困惑。不如**事先说清楚**，
  *   并把主按钮指向真正可用的那条路（打印为 PDF）。
+ *
+ * 另外：Linux 服务器上生成的 PDF 有已知缺陷（部分汉字被写成康熙部首，
+ * 复制与搜索失效），所以「服务端生成」默认**不是**主按钮。
  */
 function applyServerPdfCapability() {
   const cap = state.capabilities?.serverPdf;
   const btn = $('#btnServerPdf');
   const prev = $('#btnPreview');
+  const note = $('#serverPdfNote');
   if (!cap) return;                       // 还没探测到，保持原样
 
   if (cap.available) {
     btn.disabled = false;
     btn.textContent = '服务端生成';
     btn.title = `用 ${cap.driver} 生成`;
-    prev.classList.remove('btn-primary');
+    // 主按钮留给「打印为 PDF」——它没有编码缺陷
+    btn.classList.remove('btn-primary');
+    prev.classList.add('btn-primary');
+    if (note) note.hidden = false;
     return;
   }
 
@@ -641,7 +648,8 @@ function applyServerPdfCapability() {
   btn.textContent = '服务端生成（未安装）';
   btn.title = cap.reason ?? '';
   btn.disabled = false;                   // 仍可点，点了给出解释而不是静默
-  prev.classList.add('btn-primary');      // 主按钮让给真正能用的那条路
+  prev.classList.add('btn-primary');
+  if (note) note.hidden = true;           // 没装就没这个缺陷可言，别吓人
 }
 
 /* ------------------------------ 设置 ------------------------------ */
