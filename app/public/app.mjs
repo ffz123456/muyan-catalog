@@ -201,7 +201,21 @@ function renderViewer() {
   });
 
   const note = $('#scopeNote');
-  if (state.scope === 'all') {
+  /**
+   * 单机模式下**不讲"能看到谁的订单"**。
+   *
+   * 为什么：单机版只有使用者自己，本机就是全部。
+   * 说"你是管理者，可以看到全部销售的订单"会让人以为
+   * "还有别的销售在用"或者"我是不是配错了"——
+   * 那是真机上实测发现的问题：用户看到这句会困惑。
+   *
+   * 话术要跟运行形态一致：多人模式才谈隔离，单人模式谈数据在哪。
+   */
+  if (state.solo) {
+    note.innerHTML = '📱 这个文件就是你的全部工具，'
+      + '<strong>数据只存在这台设备上</strong>，不会上传到任何地方。';
+    note.hidden = false;
+  } else if (state.scope === 'all') {
     note.innerHTML = '👀 你是管理者，<strong>可以看到全部销售的订单</strong>。';
     note.hidden = false;
   } else {

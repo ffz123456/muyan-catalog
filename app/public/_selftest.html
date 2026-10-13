@@ -38,12 +38,26 @@
 <div id="out"></div>
 <div id="ua"></div>
 
-<!-- 应用本体要靠这个全局变量，自检页也要引 -->
-<script src="/vendor/pouchdb.min.js"></script>
+<!--
+  单机版模式（file:// 打开时）不引 PouchDB——
+  单文件版把 PouchDB 内联在自己里面，这里引外部文件反而会在 file:// 下 404。
+-->
+<script>
+  if (location.protocol !== 'file:') {
+    document.write('<script src="/vendor/pouchdb.min.js"><\/script>');
+  }
+</script>
 <script type="module">
 const out = document.getElementById('out');
 const summary = document.getElementById('summary');
 let pass = 0, fail = 0;
+
+/** file:// 打开时只能做"本机能力"自检，不能碰服务端。 */
+const OFFLINE = location.protocol === 'file:';
+/** 上报地址：file:// 下要写全（相对路径会解析成 file:///api/... 必然失败）。 */
+const REPORT_URL = OFFLINE
+  ? (new URLSearchParams(location.search).get('report') || '')
+  : '/api/_selftest-report';
 
 function group(title) {
   const d = document.createElement('div');
@@ -99,14 +113,32 @@ document.getElementById('ua').textContent = '浏览器标识：' + navigator.use
 (async () => {
   const PW = new URLSearchParams(location.search).get('pw') || '';
 
+  /* ---------- ⓪ 运行形态 ---------- */
+  {
+    const g0 = group('⓪ 运行形态');
+    report(g0, OFFLINE ? '单机版（file:// 直接打开）' : '联服务端（http://）', true, location.href.slice(0, 90));
+  }
+
   /* ---------- ① 环境 ---------- */
   const g1 = group('① 环境');
   report(g1, '能跑 JavaScript', true);
-  report(g1, '有 PouchDB（本地数据库）', typeof PouchDB === 'function',
-    typeof PouchDB === 'function' ? PouchDB.version : '没加载到');
+  if (OFFLINE) {
+    /** 单机版把 PouchDB 内联在文件里，所以这里读的是**单文件版**里的那份。 */
+    report(g1, '有 PouchDB（本地数据库）', typeof PouchDB === 'function',
+      typeof PouchDB === 'function' ? PouchDB.version : '没加载到 —— 单文件版会打不开数据');
+  } else {
+    report(g1, '有 PouchDB（本地数据库）', typeof PouchDB === 'function',
+      typeof PouchDB === 'function' ? PouchDB.version : '没加载到');
+  }
   let idbOk = false;
   try { idbOk = !!indexedDB; } catch (e) { idbOk = false; }
   report(g1, '有 IndexedDB（订单存这里）', idbOk);
+
+  /* ---------- 单机版：只测本机能力，到此为止 ---------- */
+  if (OFFLINE) {
+    await offlineChecks();
+    return;
+  }
 
   /* ---------- ② 登录 ---------- */
   const g2 = group('② 登录');
@@ -339,6 +371,121 @@ document.getElementById('ua').textContent = '浏览器标识：' + navigator.use
   }
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  /**
+   * 单机版（file://）专用的检查。
+   *
+   * 单机版不联任何服务端，所以只关心"这台设备能不能把它跑起来"：
+   *   · 本地能不能真存住数据（IndexedDB + PouchDB 附件）
+   *   · 拍照/选图能力
+   *   · 画册排版（用内联的同一份渲染器）
+   *
+   * ⚠️ 所有这些都必须在**没有网络**的前提下成立——
+   *    这正是单机版存在的意义。
+   */
+  async function offlineChecks() {
+    const g = group('② 本地存数据（单机版全靠它）');
+    let db = null;
+    try {
+      db = await new Promise((res, rej) => {
+        const rq = indexedDB.open('offline_test_' + Date.now(), 1);
+        rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+        rq.onblocked = () => rej(new Error('被阻塞（可能开了多个标签页）'));
+      });
+      report(g, '能打开本地数据库', true);
+      await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put('中文测试', 'k');
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      const back = await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readonly');
+        const q = tx.objectStore('kv').get('k');
+        q.onsuccess = () => res(q.result);
+        q.onerror = () => rej(q.error);
+      });
+      report(g, '能写入并读回中文', back === '中文测试', '读回 ' + JSON.stringify(back));
+      db.close();
+    } catch (e) {
+      report(g, '本地数据库可用', false, e.message);
+    }
+
+    const g3 = group('③ 产品照片能不能存（附件）');
+    if (typeof PouchDB !== 'function') {
+      report(g3, 'PouchDB 可用', false, '没加载到，单文件版会存不了产品');
+    } else {
+      try {
+        const pdb = new PouchDB('offline_pouch_' + Date.now());
+        // 造一张小图当照片
+        const c = document.createElement('canvas');
+        c.width = 40; c.height = 30;
+        const cx = c.getContext('2d');
+        cx.fillStyle = '#8a5a3b'; cx.fillRect(0, 0, 40, 30);
+        const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+        report(g3, '能把图片压成二进制', !!blob && blob.size > 0, `${blob?.size ?? 0} 字节`);
+
+        await pdb.put({
+          _id: 'img_test.jpg',
+          _attachments: { 'img_test.jpg': { content_type: 'image/jpeg', data: blob } },
+        });
+        const got = await pdb.getAttachment('img_test.jpg', 'img_test.jpg');
+        report(g3, '图片能存进本地库并取回', !!got && got.size > 0,
+          `取回 ${got?.size ?? 0} 字节`);
+        pdb.destroy();
+      } catch (e) {
+        report(g3, '图片存取', false, e.message);
+      }
+    }
+
+    const g4 = group('④ 拍照与画册');
+    report(g4, '有文件选择能力（拍照/选图）', typeof FileReader === 'function');
+    report(g4, '有 canvas（压缩图片用）', !!document.createElement('canvas').getContext);
+    try {
+      /**
+       * 画册渲染器在单文件版里是**内联**的，拿不到模块 URL。
+       * 所以这里只验证"渲染所需的能力"在不在，
+       * 真正的渲染由单文件版自己的自检代码覆盖。
+       */
+      const probe = document.createElement('div');
+      probe.style.cssText = 'width:210mm;height:297mm';
+      document.body.appendChild(probe);
+      const w = probe.getBoundingClientRect().width;
+      probe.remove();
+      // 210mm ≈ 793.7px
+      report(g4, '能用毫米排版（画册是 A4）', Math.abs(w - 793.7) < 8, `210mm = ${Math.round(w)}px`);
+    } catch (e) {
+      report(g4, '毫米排版', false, e.message);
+    }
+
+    updateSummary();
+    await sendReport();
+  }
+
+  /** 把结果上报（file:// 下要显式给绝对地址）。 */
+  async function sendReport() {
+    if (!REPORT_URL) return;
+    const lines = [];
+    out.querySelectorAll('.row').forEach((row) => {
+      const mark = row.querySelector('.mark')?.textContent ?? '?';
+      const name = row.querySelector('div:nth-child(2)')?.childNodes[0]?.textContent ?? '';
+      const detail = row.querySelector('.detail')?.textContent ?? '';
+      lines.push(`${mark} ${name}${detail ? '  [' + detail + ']' : ''}`);
+    });
+    try {
+      await fetch(REPORT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pass, fail, ua: navigator.userAgent, mode: OFFLINE ? 'solo-file' : 'team-http',
+          screen: `${screen.width}x${screen.height} dpr=${devicePixelRatio}`,
+          lines,
+        }),
+      });
+    } catch { /* 上报失败不影响自检（单机版本就不该依赖网络） */ }
+  }
 
   /**
    * ---------- ⑧ 真实界面操作（在平板上点按钮，不是调函数）----------
