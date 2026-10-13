@@ -7,7 +7,7 @@
   "scripts": {
     "verify": "node verify-sync.mjs"
   },
-  "license": "GPL-3.0",
+  "license": "AGPL-3.0",
   "dependencies": {
     "pouchdb": "^9.0.0",
     "pouchdb-server": "^4.2.0"
