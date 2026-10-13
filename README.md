@@ -1,8 +1,8 @@
 # 木言 · 开单画册
 
-[![验证](https://github.com/ffz123456/---/actions/workflows/verify.yml/badge.svg)](https://github.com/ffz123456/---/actions/workflows/verify.yml)
+[![验证](https://github.com/ffz123456/muyan-catalog/actions/workflows/verify.yml/badge.svg)](https://github.com/ffz123456/muyan-catalog/actions/workflows/verify.yml)
 
-> 验证徽章：仓库改名后这里要跟着改。
+> 每次推送都会跑一遍后端验证套件（见 `.github/workflows/verify.yml`）。
 
 **给一家家具经销商用的开单工具。** 销售在手机上选货出画册、开单，
 **互相看不到对方的单**。零安装——销售只拿到一个网址，或一个文件。
