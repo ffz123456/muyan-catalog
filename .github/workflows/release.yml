@@ -54,11 +54,24 @@ jobs:
           node tools/check-encoding.mjs .
           ls -lh dist/
 
+      # Release 里的资产名改成纯 ASCII。
+      #
+      # ⚠️ 实测踩过：直接用中文名上传，GitHub 会把文件名里的非 ASCII 字符
+      #    **整个剥掉**——`木言-单机版.html` 变成 `-.html`，
+      #    `木言-团队版中心.zip` 变成 `-.zip`。
+      #    文件内容是对的，但用户看到一堆 `-.zip` 根本不知道下哪个。
+      #
+      # 顺带这也是更稳的做法：文件名里的中文在跨系统解压时是经典坑
+      # （Windows/某些 unzip 会乱码）。**压缩包内部**的中文名不受影响，
+      # 已经验证过（`启动.cmd`、`木言-服务端.exe` 都正常）。
+      - name: 改成 ASCII 名
+        run: cp 'app/dist/木言-单机版.html' muyan-solo.html
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: solo
-          path: app/dist/木言-单机版.html
+          path: muyan-solo.html
 
   # ------------------------------------------------------------------
   # 团队版中心：编译成 Windows 可执行文件。**必须在 Windows 上构建**。
@@ -96,19 +109,21 @@ jobs:
           Write-Host "  包大小：$sz MB"
           if ($sz -lt 50) { throw "包太小（$sz MB），多半没打全" }
 
-      # 打成 zip：Release 里发文件夹不方便，用户解压即用
+      # 打成 zip：Release 里发文件夹不方便，用户解压即用。
+      # 文件名用 ASCII（同 solo 那边的理由：中文资产名会被 GitHub 剥掉）。
+      # **压缩包内部**的中文名不受影响，已验证。
       - name: 压缩
         shell: pwsh
         run: |
-          Compress-Archive -Path 'windows/dist/木言/*' -DestinationPath '木言-团队版中心.zip' -Force
-          $sz = [math]::Round((Get-Item '木言-团队版中心.zip').Length/1MB, 1)
+          Compress-Archive -Path 'windows/dist/木言/*' -DestinationPath 'muyan-hub.zip' -Force
+          $sz = [math]::Round((Get-Item 'muyan-hub.zip').Length/1MB, 1)
           Write-Host "  zip 大小：$sz MB"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: hub
-          path: 木言-团队版中心.zip
+          path: muyan-hub.zip
 
   # ------------------------------------------------------------------
   # 建 Release 并附上两个产物
@@ -129,8 +144,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/solo/木言-单机版.html
-            artifacts/hub/木言-团队版中心.zip
+            artifacts/solo/muyan-solo.html
+            artifacts/hub/muyan-hub.zip
           draft: false
           # 说明正文由 Release 页面手动填（或用 tag 注释）。
           # 这里只负责把产物挂上去——**产物的来源可追溯**才是这一步的价值。
@@ -140,8 +155,11 @@ jobs:
 
             | 你的情况 | 下这个 |
             |---|---|
-            | **一个人用** | `木言-单机版.html` —— 发到手机上，用浏览器打开就能用。不需要服务器、不需要网络、不装任何东西 |
-            | **几个人共享订单** | `木言-团队版中心.zip` —— 解压到一台能常开的电脑上，双击 `启动.cmd`，把网址发给销售 |
+            | **一个人用** | `muyan-solo.html`（木言·单机版）—— 发到手机上，用浏览器打开就能用。不需要服务器、不需要网络、不装任何东西 |
+            | **几个人共享订单** | `muyan-hub.zip`（木言·团队版中心）—— 解压到一台能常开的电脑上，双击 `启动.cmd`，把网址发给销售 |
+
+            > 文件名用英文是为了避免各系统解压时中文乱码。
+            > 压缩包**内部**的中文名是正常的（`启动.cmd`、`木言-服务端.exe`）。
 
             ### 单机版怎么用
 
