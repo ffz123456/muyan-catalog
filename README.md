@@ -1,11 +1,14 @@
 # 木言 · 开单画册
 
-[![验证](https://github.com/OWNER/REPO/actions/workflows/verify.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/verify.yml)
+[![验证](https://github.com/ffz123456/---/actions/workflows/verify.yml/badge.svg)](https://github.com/ffz123456/---/actions/workflows/verify.yml)
 
-> ⬆️ 发布到 GitHub 后，把 `OWNER/REPO` 换成你的仓库路径，徽章就会亮起来。
+> 验证徽章：仓库改名后这里要跟着改。
 
 **给一家家具经销商用的开单工具。** 销售在手机上选货出画册、开单，
 **互相看不到对方的单**。零安装——销售只拿到一个网址，或一个文件。
+
+> 一个用 AI 开发的小工具。代码、验证脚本、踩坑记录都在仓库里，
+> 有兴趣的人可以直接读、直接改。
 
 **不做 ERP。** 只做两件事：
 
