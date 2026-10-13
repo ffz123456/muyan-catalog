@@ -20,6 +20,13 @@ name: 发布
 on:
   push:
     tags: ['v*']
+  # 支持手动触发。
+  #
+  # ⚠️ 但注意：手动触发时 `github.ref` 是 `refs/heads/main`（或所选分支），
+  #    **不是 tag**。所以下面 release 任务里的版本号与 tag 名不能依赖 github.ref_name，
+  #    必须显式找"最新的 v* tag"。
+  #    我第一版就是直接用了 github.ref_name，手动触发时那个任务会被
+  #    条件判断挡掉、什么都不做——白点一次。
   workflow_dispatch:
 
 permissions:
@@ -131,11 +138,28 @@ jobs:
   release:
     needs: [solo, hub]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 需要 tag 才能找到最新版本号
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # 手动触发时没有 tag 上下文，得自己找目标 tag。
+      # 用 tag 触发时 github.ref_name 就是它。
+      - name: 确定目标 tag
+        id: t
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "  目标 tag：$TAG"
 
       - name: 列出将发布的文件
         run: find artifacts -type f -exec ls -lh {} \;
@@ -143,6 +167,7 @@ jobs:
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.t.outputs.tag }}
           files: |
             artifacts/solo/muyan-solo.html
             artifacts/hub/muyan-hub.zip
