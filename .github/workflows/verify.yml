@@ -111,6 +111,10 @@ jobs:
           node tools/check-catalog-fit.mjs
           node tools/verify-multi-image.mjs
           node tools/check-catalog-truncation.mjs
+          # 分页：奇数个产品时末页会不会多出空白行（固定行高的副作用）
+          node tools/check-catalog-pagination.mjs
+          # 模板功能：封面 Logo、分类分节、有效期、特殊字符转义
+          node tools/verify-catalog-template.mjs
 
       # 旧手机兼容性：源码里的 ?? / ?. 要 Chrome 80+，
       # 而 Android 10 上的 Edge 内核停在 77 —— 直接 SyntaxError，整个脚本不执行。
