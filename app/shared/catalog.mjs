@@ -263,11 +263,45 @@ export const HTML_SHELL = `<!doctype html>
     font-size:8pt; color:var(--ink-mute); letter-spacing:.4pt;
   }
 
-  /* 产品网格 */
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:7mm 6mm; }
+  /*
+    产品网格。
+    display:grid;
+    grid-template-columns:1fr 1fr;
+
+    ⚠️ **行高必须是固定的**，这是"不论录入多长都不会溢出"的根本保证。
+
+    为什么：每页固定 PER_PAGE 个产品、排成 2 行。行高钉死之后，
+    卡片再高也只能占那么多，**内容再多也不会把页撑破**。
+
+    行高怎么来的（**实测，不是纸面换算**）：
+        页边距 60+60 + 页眉 43+26 + 页脚 33+15 = 237px（62.7mm）
+        A4 1123px − 237px = 886px 留给网格
+        (886 − 行间距 26.5) / 2 = 429.8px  →  取 113mm，留一点余量
+
+    ⚠️ 我第一版按纸面算成 116.5mm，实测每行多 10px、整页溢出 7px。
+       **字体的实际行高、边框、margin 塌陷都和纸面计算不一样**，
+       所以这个数必须量出来，不能推。改了 PER_PAGE 或页眉页脚就重量：
+           node tools/measure-page-parts.mjs
+
+    实测过的临界点（修之前，行高不固定）：
+        名称 120 字          → 溢出 40px
+        规格 260 字          → 溢出 14px
+        18 个卖点            → 溢出 36px
+        名称30+规格120+8卖点 → 溢出 40px   ← 这个是现实中会遇到的正常录入
+    而 .page 用的是 min-height，超出的部分打印时**静默裁掉**，不报错。
+
+    ⚠️ 这段 CSS 在**模板字符串**里，注释中**不能出现反引号**——
+       一个反引号就会把字符串截断，报出 ".page is not a function" 这种
+       完全看不出原因的错。我就这么踩过一次。
+  */
+  .grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:7mm 6mm;
+    grid-auto-rows:113mm;            /* 见上面的实测推导，别按纸面算 */
+  }
   .card {
     border:.6pt solid var(--line); border-radius:2.5pt; overflow:hidden;
     display:flex; flex-direction:column; page-break-inside:avoid;
+    min-height:0;                    /* 允许在固定行高内收缩，否则内容会把行顶高 */
   }
   .card-img {
     width:100%; height:42mm; background:var(--accent-bg);
@@ -294,11 +328,34 @@ export const HTML_SHELL = `<!doctype html>
     align-self:center; font-size:7pt; color:var(--ink-mute);
     padding-left:.6mm;
   }
-  .card-body { padding:2.6mm 3.8mm 3.0mm; display:flex; flex-direction:column; flex:1; }
+  .card-body { padding:2.6mm 3.8mm 3.0mm; display:flex; flex-direction:column; flex:1; min-height:0; }
   .card-cat { font-size:7.5pt; color:var(--accent); letter-spacing:.8pt; margin-bottom:1.4mm; }
-  .card-name { font-size:11.5pt; font-weight:700; line-height:1.35; margin:0 0 2.2mm; }
-  .card-spec { font-size:8.6pt; color:var(--ink-soft); line-height:1.62; margin:0 0 2.4mm; flex:1; }
-  .card-highlights { margin:0 0 2.8mm; }
+
+  /*
+    名称与规格做**行数截断**，超出的用省略号。
+    固定行高已经保证了不溢出，截断是为了"溢出时看起来是有意截的"，
+    而不是被卡片边缘生硬切掉半个字。
+
+    为什么是 2 行 / 4 行：
+      名称放 2 行（11.5pt × 1.35 ≈ 5.5mm/行）
+      规格放 4 行（8.6pt × 1.62 ≈ 4.9mm/行）
+      加上品类、卖点、价格，总高落在 116.5mm 内还留有余量。
+    要放更长的内容就调这里，**并重新跑 tools/find-a4-limit.mjs 确认**。
+  */
+  .card-name {
+    font-size:11.5pt; font-weight:700; line-height:1.35; margin:0 0 2.2mm;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .card-spec {
+    font-size:8.6pt; color:var(--ink-soft); line-height:1.62; margin:0 0 2.4mm; flex:1;
+    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+    min-height:0;
+  }
+  /* 卖点行数也限一下：26 个卖点实测会溢出 91px */
+  .card-highlights {
+    margin:0 0 2.8mm; overflow:hidden;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  }
   .tag {
     display:inline-block; font-size:7.6pt; color:var(--ink-soft);
     background:var(--accent-bg); border-radius:1.6pt;

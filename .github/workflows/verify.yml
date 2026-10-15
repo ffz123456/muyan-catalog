@@ -91,10 +91,17 @@ jobs:
       #    连命令行的 --print-to-pdf 都用不了（6 组参数全 FATAL）。
       #    那种情况下用 tools/check-catalog-fit.mjs 做静态核算兜底。
       #
-      # ⚠️ check-a4-detects-overflow 是"检查的检查"：
-      #    之前 assertLayout 把视口高度设成了 A4 高度，导致**永远报通过**——
-      #    一个不报错的死断言。这一步故意塞爆内容，确认它真的有检测能力。
-      #    少了它，一个假绿灯会在 CI 里绿一辈子。
+      # ⚠️ 这里有三层，各有各的用，缺一层就会漏掉一类问题：
+      #
+      #   check-catalog-fit      纯毫米核算，不开浏览器。改 PER_PAGE 或页边距时
+      #                          能立刻发现"卡片比 A4 还高"。
+      #   verify-multi-image     真开浏览器逐页量高度，验证多图排版不溢出。
+      #   check-catalog-truncation  验证**截断行为**，而且验证"检查本身是活的"：
+      #      · 当初 assertLayout 把视口高度设成 A4 高度 → 永远报通过，
+      #        是个不报错的死断言。故意塞爆必须能报出来，否则等于没检查。
+      #      · 现在卡片行高固定，内容再多也撑不破页（会被裁）。
+      #        所以重点转向：截断必须是"有意的"（限行+省略号），
+      #        而且**价格与库存永远不能被裁**——那是成交信息。
       - name: 多图排版
         env:
           PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
@@ -103,7 +110,7 @@ jobs:
           cd app
           node tools/check-catalog-fit.mjs
           node tools/verify-multi-image.mjs
-          node tools/check-a4-detects-overflow.mjs
+          node tools/check-catalog-truncation.mjs
 
       # 旧手机兼容性：源码里的 ?? / ?. 要 Chrome 80+，
       # 而 Android 10 上的 Edge 内核停在 77 —— 直接 SyntaxError，整个脚本不执行。
