@@ -220,14 +220,26 @@ async function lowerHtml(html, name) {
  * 这样"改了源码忘了构建"这个坑被自动堵上，同时不会每次启动都白跑一遍。
  */
 async function isStale() {
-  const pairs = [
-    [path.join(PUBLIC, 'app.mjs'), path.join(PUBLIC, 'app.js')],
-    [path.join(PUBLIC, 'backend.mjs'), path.join(PUBLIC, 'backend.js')],
-    [path.join(PUBLIC, 'localdb.mjs'), path.join(PUBLIC, 'localdb.js')],
-    [path.join(PUBLIC, 'syncdb.mjs'), path.join(PUBLIC, 'syncdb.js')],
-    [path.join(SHARED, 'catalog.mjs'), path.join(PUBLIC, 'shared', 'catalog.js')],
-    // 补丁文件是生成的，源码就是本文件——下面单独判断
-  ];
+  /**
+   * ⚠️ **动态扫描目录，不要维护一份写死的文件清单。**
+   *
+   * 第一版这里是手写的 pairs 列表。后来加了 shared/csv.mjs，忘了同步加进来 ——
+   * 后果是：改了 csv.mjs 之后 `isStale()` 认为产物是最新的、**不重建**，
+   * 于是浏览器加载的还是旧的 csv.js。
+   * 症状是"改了代码却没生效"，而且**不报任何错**，比报错难查得多。
+   *
+   * 现在改成：public 和 shared 下每个 .mjs 都要求有对应的 .js 产物，
+   * 新增文件自动纳入判断。
+   */
+  const pairs = [];
+  for (const dir of [PUBLIC, SHARED]) {
+    for (const f of await fs.readdir(dir).catch(() => [])) {
+      if (!f.endsWith('.mjs')) continue;
+      const outDir = dir === PUBLIC ? PUBLIC : path.join(PUBLIC, 'shared');
+      pairs.push([path.join(dir, f), path.join(outDir, f.replace(/\.mjs$/, '.js'))]);
+    }
+  }
+
   for (const [src, out] of pairs) {
     let s;
     let o;
@@ -269,12 +281,21 @@ async function build() {
     written.push([f, f.replace(/\.mjs$/, '.js'), src.length, out.length]);
   }
 
-  /* ---------- 2. 共享渲染器（浏览器端也用）---------- */
+  /* ---------- 2. 共享模块（服务端与浏览器共用，浏览器端也要降级）---------- */
+  /**
+   * ⚠️ 这里要**遍历整个 shared 目录**，不能把文件名写死。
+   *    第一版只处理 catalog.mjs；后来加了 csv.mjs（订单导出用）——
+   *    浏览器直接 404，而症状是"点导出按钮没反应"，
+   *    跟"少构建了一个文件"看起来毫无关系，极难对上。
+   */
   await fs.mkdir(path.join(PUBLIC, 'shared'), { recursive: true });
-  const catSrc = await fs.readFile(path.join(SHARED, 'catalog.mjs'), 'utf-8');
-  const catOut = await lower(catSrc, { sourcefile: 'catalog.mjs' });
-  await fs.writeFile(path.join(PUBLIC, 'shared', 'catalog.js'), catOut, 'utf-8');
-  written.push(['shared/catalog.mjs', 'public/shared/catalog.js', catSrc.length, catOut.length]);
+  for (const f of (await fs.readdir(SHARED)).filter((x) => x.endsWith('.mjs'))) {
+    const src = await fs.readFile(path.join(SHARED, f), 'utf-8');
+    const out = await lower(src, { sourcefile: f });
+    const dst = f.replace(/\.mjs$/, '.js');
+    await fs.writeFile(path.join(PUBLIC, 'shared', dst), out, 'utf-8');
+    written.push([`shared/${f}`, `public/shared/${dst}`, src.length, out.length]);
+  }
 
   /* ---------- 3. 运行时补丁 ---------- */
   const pfCode = polyfillCode();

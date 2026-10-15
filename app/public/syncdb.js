@@ -337,13 +337,14 @@ async function recountPending() {
   emit();
   return state.pending;
 }
-async function newOrder(input, salesId) {
+async function newOrder(input, salesId, salesDisplay) {
   var _a, _b, _c, _d, _e, _f, _g, _h;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const doc = {
     _id: newId(),
     type: "order",
     sales_id: salesId,
+    sales_display: salesDisplay || salesId,
     status: "active",
     customer_name: (_a = input.customer_name) != null ? _a : "",
     customer_phone: (_b = input.customer_phone) != null ? _b : "",

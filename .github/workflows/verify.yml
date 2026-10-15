@@ -129,6 +129,12 @@ jobs:
           node tools/build-solo.mjs
           node tools/verify-solo-in-browser.mjs
 
+      # 订单导出：CSV 转义和公式注入这两件事**不看数据发现不了**。
+      # 客户名里一个逗号就能让整张表列错位，而人会先去怀疑统计逻辑。
+      # 这里纯逻辑验证，不需要服务端。
+      - name: 订单导出
+        run: cd app && node tools/verify-export.mjs
+
       - name: 启动服务端
         run: |
           cd app

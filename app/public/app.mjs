@@ -11,6 +11,7 @@
 import * as sync from './syncdb.mjs';
 import * as backend from './backend.mjs';
 import { renderCatalogHtml } from './../shared/catalog.mjs';
+import { ordersToItemsCsv, ordersToSummaryCsv, exportFileName } from './../shared/csv.mjs';
 
 /* ------------------------------ 工具 ------------------------------ */
 
@@ -289,6 +290,26 @@ async function refreshOrdersFromLocal() {
 
 /* ------------------------------ 订单列表 ------------------------------ */
 
+/**
+ * 订单归属显示成什么。
+ *
+ * 管理者看全部订单时要能看出"这单是谁出的"。三级回退：
+ *
+ *   1. **账号列表里的当前显示名** —— 账号还在就用当前值，改名后立即生效
+ *   2. **订单上存的快照** `sales_display` —— 账号被停用或删除后（人离职了）
+ *      仍然看得出这张单是谁出的。订单是经营凭证，要长期留着
+ *   3. **登录名本身** —— 老订单没有快照字段，退到登录名，总比什么都不显示强
+ *
+ * 为什么不只做第 1 条：账号删掉之后，历史订单会全变成 `alice` 这种登录名，
+ * 谁都看不懂。见 syncdb.mjs 里 newOrder 的说明。
+ */
+function ordersOwnerLabel(o) {
+  const cur = state.sales.find((s) => s.name === o.sales_id);
+  if (cur) return cur.display || cur.name;
+  if (o.sales_display) return o.sales_display;
+  return o.sales_id;
+}
+
 function renderOrders() {
   const s = state.orders;
   const st = state.orderStats ?? { total: 0, thisMonth: 0, thisMonthAmount: 0 };
@@ -298,6 +319,8 @@ function renderOrders() {
     <div class="stat"><div class="stat-num">${st.total ?? 0}</div><div class="stat-label">累计单数</div></div>`;
 
   $('#orderCount').textContent = s.length ? `共 ${s.length} 张单` : '';
+  // 没单时不显示导出按钮：空表导出来没意义
+  $('#btnExport').hidden = !s.some((o) => o.status !== 'deleted');
   const list = $('#orderList');
   const empty = $('#orderEmpty');
 
@@ -310,7 +333,7 @@ function renderOrders() {
         <div class="item-name">${esc(o.customer_name || '（未填客户）')}</div>
         <div class="item-sub">
           ${fmtDate(o.created_at)} · ${o.item_count} 件
-          ${state.scope === 'all' ? ' · ' + esc(o.sales_id) : ''}
+          ${state.scope === 'all' ? ' · ' + esc(ordersOwnerLabel(o)) : ''}
           ${o.discount > 0 ? ' · 让利 ' + money(o.discount) : ''}
         </div>
       </div>
@@ -423,12 +446,78 @@ function openOrderSheet(id) {
   f.elements.remark.value = o?.remark ?? '';
 
   renderOrderItems();
+
+  /**
+   * 归属与时间：只给"看全部订单"的人看，而且只对已存在的单显示。
+   *
+   * 销售看自己的单时不显示 —— 他当然知道是自己出的，多一行字是噪音。
+   * 新建单时也不显示 —— 还没有归属可言。
+   */
+  const showMeta = !!o && state.scope === 'all';
+  $('#orderMeta').hidden = !showMeta;
+  if (showMeta) {
+    $('#orderMetaOwner').textContent = '出单人：' + ordersOwnerLabel(o);
+    $('#orderMetaTime').textContent = `${fmtDate(o.created_at)} 开单`
+      + (o.updated_at && o.updated_at !== o.created_at
+        ? `　${fmtDate(o.updated_at)} 改过` : '');
+  }
+
   $('#orderSheet').hidden = false;
 }
 
 function closeOrderSheet() {
   $('#orderSheet').hidden = true;
   state.editingOrder = null;
+}
+
+/**
+ * 触发浏览器下载一段文本。
+ *
+ * 为什么用 Blob + <a download> 而不是 data: URL：
+ *   订单多了以后 CSV 能到几 MB，data: URL 在部分安卓浏览器上会被截断
+ *   （而且报错方式很隐蔽：文件下载下来了但内容不全）。
+ *   Blob URL 没有长度限制。
+ *
+ * 为什么下载完要 revokeObjectURL：
+ *   不撤销的话这段内容会一直占着内存，导几次之后手机上就吃紧了。
+ */
+function downloadText(filename, text, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  // 有些浏览器要求元素在文档里才肯触发下载
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 立刻撤销会让部分浏览器来不及开始下载，延后一点
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+/**
+ * 导出订单。
+ *
+ * 导的是**当前能看到的那些单**：销售导自己的，管理者导全部。
+ * 这和界面上的范围提示一致 —— 不该出现"看着是 3 张、导出却是 20 张"。
+ *
+ * 为什么一次给两份文件（明细 + 汇总）：
+ *   明细回答"都卖了什么、按什么价"，汇总回答"这个月多少张单多少钱"。
+ *   两份都能从对方推出来，但**用户不会用数据透视表**，
+ *   多下载一个文件比教他做透视省事。
+ */
+function exportOrders() {
+  const src = state.orders.filter((o) => o.status !== 'deleted');
+  if (!src.length) return toast('还没有订单可以导出', true);
+
+  try {
+    downloadText(exportFileName('订单明细'), ordersToItemsCsv(src));
+    // 两份文件用同一个时间戳前缀，下载后能看出是一批的
+    downloadText(exportFileName('订单汇总'), ordersToSummaryCsv(src));
+    toast(`已导出 ${src.length} 张单（明细 + 汇总两份表格）`);
+  } catch (err) {
+    toast(`导出失败：${err.message}`, true);
+  }
 }
 
 /* ------------------------------ 选产品弹层 ------------------------------ */
@@ -1061,6 +1150,7 @@ function bind() {
   }
 
   $('#btnNewOrder2').addEventListener('click', () => openOrderSheet(null));
+  $('#btnExport').addEventListener('click', exportOrders);
 
   /* ---- 开单：加产品 ---- */
   $('#btnAddItem').addEventListener('click', () => {
@@ -1132,7 +1222,8 @@ function bind() {
     btn.textContent = '保存中…';
     try {
       if (editingId) await sync.updateOrderDoc(editingId, meta);
-      else await sync.newOrder(meta, state.viewer.name);
+      // 第三个参数是显示名快照：管理者看全部订单时显示它而不是登录名
+      else await sync.newOrder(meta, state.viewer.name, state.viewer.display);
 
       closeOrderSheet();
       state.syncInfo = sync.snapshot();

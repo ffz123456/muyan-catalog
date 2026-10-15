@@ -42,8 +42,20 @@ const PUBLIC = path.join(APP, 'public');
 const SHARED = path.join(APP, 'shared');
 const OUT_DIR = path.join(APP, 'dist');
 
-/** 要打包的模块，按依赖顺序（被依赖的在前）。 */
+/**
+ * 要打包的模块，按依赖顺序（被依赖的在前）。
+ *
+ * ⚠️ 加了新的共享模块**必须加到这里**，否则单机版里 import 不到它，
+ *    而症状是"某个功能在单机版里静默失效"（团队版正常）——
+ *    这种"只有一个形态坏"的问题最容易漏。
+ *
+ * 顺带说明：`shared/` 下的模块是服务端与浏览器共用的，
+ * 两边都要能用，所以改动它们之后**两个构建都要跑**：
+ *     node tools/build-web.mjs    （团队版：降级成 public/shared/*.js）
+ *     node tools/build-solo.mjs   （单机版：打进那一个 HTML 文件）
+ */
 const MODULES = [
+  { key: 'csv', file: path.join(SHARED, 'csv.mjs') },
   { key: 'catalog', file: path.join(SHARED, 'catalog.mjs') },
   { key: 'localdb', file: path.join(PUBLIC, 'localdb.mjs') },
   { key: 'syncdb', file: path.join(PUBLIC, 'syncdb.mjs') },

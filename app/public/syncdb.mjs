@@ -532,12 +532,34 @@ export async function recountPending() {
   return state.pending;
 }
 
-export async function newOrder(input, salesId) {
+/**
+ * 建一张新订单。
+ *
+ * @param input    业务字段
+ * @param salesId  登录名。**这是订单隔离的依据**，不是给人看的
+ * @param salesDisplay  显示名快照（如「销售 A」），见下方说明
+ *
+ * ── 为什么订单里要存一份显示名 ──
+ *
+ * `sales_id` 是登录名（`alice`），界面上管理者看到的却是「销售 A」。
+ * 只显示登录名，管理者得自己记住谁是谁 —— 人一多就对不上了。
+ *
+ * 那为什么不干脆"渲染时去账号列表里查"？
+ *   因为**账号可以被停用或删除**（人离职了）。订单是经营凭证、要长期留着，
+ *   那时账号列表里已经没有这个人了，查不到就只剩一个 `alice`，
+ *   谁都看不懂这张单是谁出的。
+ *
+ * 所以存一份**快照**：成交那一刻的名字。账号还在时优先用**当前值**
+ * （改名后立即生效），账号没了就用快照（历史仍然可读）。
+ * 这和订单本身的思路一致：**记录事实，而不是引用会变的东西。**
+ */
+export async function newOrder(input, salesId, salesDisplay) {
   const now = new Date().toISOString();
   const doc = {
     _id: newId(),
     type: 'order',
     sales_id: salesId,
+    sales_display: salesDisplay || salesId,
     status: 'active',
     customer_name: input.customer_name ?? '',
     customer_phone: input.customer_phone ?? '',

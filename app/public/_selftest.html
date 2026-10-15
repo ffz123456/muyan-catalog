@@ -46,9 +46,15 @@
   (() => {
     (() => {
       (() => {
-        if (location.protocol !== "file:") {
-          document.write('<script src="/vendor/pouchdb.min.js"><\/script>');
-        }
+        (() => {
+          (() => {
+            (() => {
+              if (location.protocol !== "file:") {
+                document.write('<script src="/vendor/pouchdb.min.js"><\/script>');
+              }
+            })();
+          })();
+        })();
       })();
     })();
   })();

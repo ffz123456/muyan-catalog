@@ -1,6 +1,7 @@
 import * as sync from "./syncdb.js";
 import * as backend from "./backend.js";
 import { renderCatalogHtml } from "./shared/catalog.js";
+import { ordersToItemsCsv, ordersToSummaryCsv, exportFileName } from "./shared/csv.js";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const api = {
@@ -255,6 +256,12 @@ async function refreshOrdersFromLocal() {
   }
   renderOrders();
 }
+function ordersOwnerLabel(o) {
+  const cur = state.sales.find((s) => s.name === o.sales_id);
+  if (cur) return cur.display || cur.name;
+  if (o.sales_display) return o.sales_display;
+  return o.sales_id;
+}
 function renderOrders() {
   var _a, _b, _c, _d;
   const s = state.orders;
@@ -264,6 +271,7 @@ function renderOrders() {
     <div class="stat"><div class="stat-num">${money((_c = st.thisMonthAmount) != null ? _c : 0)}</div><div class="stat-label">\u672C\u6708\u91D1\u989D</div></div>
     <div class="stat"><div class="stat-num">${(_d = st.total) != null ? _d : 0}</div><div class="stat-label">\u7D2F\u8BA1\u5355\u6570</div></div>`;
   $("#orderCount").textContent = s.length ? `\u5171 ${s.length} \u5F20\u5355` : "";
+  $("#btnExport").hidden = !s.some((o) => o.status !== "deleted");
   const list = $("#orderList");
   const empty = $("#orderEmpty");
   if (!s.length) {
@@ -278,7 +286,7 @@ function renderOrders() {
         <div class="item-name">${esc(o.customer_name || "\uFF08\u672A\u586B\u5BA2\u6237\uFF09")}</div>
         <div class="item-sub">
           ${fmtDate(o.created_at)} \xB7 ${o.item_count} \u4EF6
-          ${state.scope === "all" ? " \xB7 " + esc(o.sales_id) : ""}
+          ${state.scope === "all" ? " \xB7 " + esc(ordersOwnerLabel(o)) : ""}
           ${o.discount > 0 ? " \xB7 \u8BA9\u5229 " + money(o.discount) : ""}
         </div>
       </div>
@@ -374,11 +382,39 @@ function openOrderSheet(id) {
   f.elements.customer_phone.value = (_c = o == null ? void 0 : o.customer_phone) != null ? _c : "";
   f.elements.remark.value = (_d = o == null ? void 0 : o.remark) != null ? _d : "";
   renderOrderItems();
+  const showMeta = !!o && state.scope === "all";
+  $("#orderMeta").hidden = !showMeta;
+  if (showMeta) {
+    $("#orderMetaOwner").textContent = "\u51FA\u5355\u4EBA\uFF1A" + ordersOwnerLabel(o);
+    $("#orderMetaTime").textContent = `${fmtDate(o.created_at)} \u5F00\u5355` + (o.updated_at && o.updated_at !== o.created_at ? `\u3000${fmtDate(o.updated_at)} \u6539\u8FC7` : "");
+  }
   $("#orderSheet").hidden = false;
 }
 function closeOrderSheet() {
   $("#orderSheet").hidden = true;
   state.editingOrder = null;
+}
+function downloadText(filename, text, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3e3);
+}
+function exportOrders() {
+  const src = state.orders.filter((o) => o.status !== "deleted");
+  if (!src.length) return toast("\u8FD8\u6CA1\u6709\u8BA2\u5355\u53EF\u4EE5\u5BFC\u51FA", true);
+  try {
+    downloadText(exportFileName("\u8BA2\u5355\u660E\u7EC6"), ordersToItemsCsv(src));
+    downloadText(exportFileName("\u8BA2\u5355\u6C47\u603B"), ordersToSummaryCsv(src));
+    toast(`\u5DF2\u5BFC\u51FA ${src.length} \u5F20\u5355\uFF08\u660E\u7EC6 + \u6C47\u603B\u4E24\u4EFD\u8868\u683C\uFF09`);
+  } catch (err) {
+    toast(`\u5BFC\u51FA\u5931\u8D25\uFF1A${err.message}`, true);
+  }
 }
 function renderPickSource(keyword = "") {
   var _a;
@@ -861,6 +897,7 @@ function bind() {
     });
   }
   $("#btnNewOrder2").addEventListener("click", () => openOrderSheet(null));
+  $("#btnExport").addEventListener("click", exportOrders);
   $("#btnAddItem").addEventListener("click", () => {
     if (!state.products.length) return toast("\u8FD8\u6CA1\u6709\u4EA7\u54C1\uFF0C\u5148\u53BB\u300C\u4EA7\u54C1\u300D\u91CC\u6DFB\u52A0", true);
     $("#pickSearch").value = "";
@@ -944,7 +981,7 @@ function bind() {
     btn.textContent = "\u4FDD\u5B58\u4E2D\u2026";
     try {
       if (editingId) await sync.updateOrderDoc(editingId, meta);
-      else await sync.newOrder(meta, state.viewer.name);
+      else await sync.newOrder(meta, state.viewer.name, state.viewer.display);
       closeOrderSheet();
       state.syncInfo = sync.snapshot();
       renderSyncChip();

@@ -76,7 +76,14 @@
 
   <div class="panel-head">
     <div class="count" id="orderCount">—</div>
-    <button class="btn btn-primary btn-lg" id="btnNewOrder">＋ 新开一单</button>
+    <div class="head-actions">
+      <!--
+        导出：销售导自己的单，管理者导全部（跟当前看到的范围一致）。
+        没单的时候隐藏 —— 空表导出来没意义。
+      -->
+      <button class="btn" id="btnExport" hidden>导出表格</button>
+      <button class="btn btn-primary btn-lg" id="btnNewOrder">＋ 新开一单</button>
+    </div>
   </div>
 
   <div class="scope-note" id="scopeNote" hidden></div>
@@ -268,6 +275,16 @@
       </div>
 
       <label>备注（可选）<input name="remark" autocomplete="off" placeholder="例如：包送货安装"></label>
+
+      <!--
+        订单归属与时间。只有"看全部订单"的人（管理者）才会看到，
+        销售看自己的单时这块是隐藏的 —— 他当然知道是自己出的。
+        新建单时也隐藏（还没有归属可言）。
+      -->
+      <div class="order-meta" id="orderMeta" hidden>
+        <span id="orderMetaOwner"></span>
+        <span id="orderMetaTime"></span>
+      </div>
 
       <div class="sheet-actions">
         <button type="button" class="btn btn-danger" id="btnDeleteOrder" hidden>删除这单</button>

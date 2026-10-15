@@ -481,6 +481,26 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .photo-move button:disabled { color: #cfc7bf; cursor: default; }
 .photo-move button:not(:disabled):active { background: var(--accent-bg); }
 
+/* ---------------- 订单归属与时间（只给管理者看） ---------------- */
+/*
+  ⚠️ **任何设了 `display` 的元素都要显式处理 `[hidden]`。**
+    浏览器默认样式里 `[hidden] { display: none }` 的优先级**低于**类选择器，
+    所以 `.order-meta { display: flex }` 会让 `hidden` 属性形同虚设 ——
+    销售也会看到归属行。这个坑对所有"用 hidden 控制显隐、又设了 display"的地方成立。
+*/
+.order-meta[hidden] { display: none; }
+.order-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  margin: 2px 0 4px; padding: 8px 10px;
+  font-size: 13px; color: var(--ink-soft);
+  background: var(--accent-bg); border-radius: var(--radius);
+}
+
+/* 订单页右上角的按钮组（导出 + 新开一单） */
+.head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.head-actions[hidden] { display: none; }
+#btnExport[hidden] { display: none; }
+
 /* ---------------- 底部操作条 ---------------- */
 .actionbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;

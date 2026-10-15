@@ -228,7 +228,55 @@ async function main() {
     cnBack?.items?.[0]?.name === '白蜡木实木茶几',
     JSON.stringify(cnBack?.items?.[0]?.name));
 
-  s.group('【10】整体');
+  /**
+   * ---------- 10. 归属显示名 ----------
+   *
+   * 为什么单独验这个：
+   *   订单的隔离键是**登录名**（`alice`），而管理者在界面上要看到「销售 A」。
+   *   销售自己看自己的单时不需要这行字，但**管理者看全部订单时必须能分辨**。
+   *
+   *   这里验证的是**数据能穿过同步**：`sales_display` 是订单文档上的一个字段，
+   *   中心端 push 时必须是**原样转发整个 doc**，不能有字段白名单把它过滤掉。
+   *   （实测确认中心端是整体转发的，但"应该能过"不算验证——所以在这里固化。）
+   *
+   * 为什么订单里要**存一份**显示名而不是只靠账号列表查：
+   *   账号可以被停用或删除（人离职了），而订单是经营凭证要长期留着。
+   *   那时账号列表里没这个人，只靠查询就只剩一个 `alice`，谁都看不懂。
+   */
+  s.group('【10】出单人显示名（管理者要能分辨是谁出的单）');
+  const dispId = `order:hub-display-${Date.now()}`;
+  await alice.post('/api/hub/push', {
+    changes: [{
+      id: dispId, rev: null,
+      doc: order(dispId, 'alice', { sales_display: '销售 A', customer_name: '归属测试' }),
+    }],
+  });
+
+  const dispBack = (await admin.post('/api/hub/pull', { since: 0 }))
+    .body?.changes.find((c) => c.id === dispId)?.doc;
+
+  s.check('显示名能穿过同步（中心端没有字段白名单把它滤掉）',
+    dispBack?.sales_display === '销售 A', JSON.stringify(dispBack?.sales_display));
+  s.check('隔离键仍是登录名（隔离依据不能被显示名替换）',
+    dispBack?.sales_id === 'alice', JSON.stringify(dispBack?.sales_id));
+
+  // bob 不该看到 alice 的单，哪怕它带了好看的显示名
+  const dispBob = await bob.post('/api/hub/pull', { since: 0 });
+  s.check('显示名不影响隔离（bob 仍看不到 alice 的单）',
+    !(dispBob.body?.changes ?? []).some((c) => c.id === dispId));
+
+  // 老订单没有这个字段时也必须能同步（向前兼容）
+  const legacyId = `order:hub-legacy-${Date.now()}`;
+  await bob.post('/api/hub/push', {
+    changes: [{ id: legacyId, rev: null, doc: order(legacyId, 'bob', { customer_name: '老订单' }) }],
+  });
+  const legacyBack = (await admin.post('/api/hub/pull', { since: 0 }))
+    .body?.changes.find((c) => c.id === legacyId)?.doc;
+  s.check('没有显示名字段的老订单照样能同步（向前兼容）',
+    legacyBack?.sales_id === 'bob' && legacyBack?.sales_display === undefined,
+    `sales_display=${JSON.stringify(legacyBack?.sales_display)}`);
+
+  s.group('【11】整体');
   s.check('全程没有出现 5xx', true, '见各步结果');
 }
 

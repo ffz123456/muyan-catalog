@@ -155,11 +155,45 @@ const HTML_SHELL = `<!doctype html>
     font-size:8pt; color:var(--ink-mute); letter-spacing:.4pt;
   }
 
-  /* \u4EA7\u54C1\u7F51\u683C */
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:7mm 6mm; }
+  /*
+    \u4EA7\u54C1\u7F51\u683C\u3002
+    display:grid;
+    grid-template-columns:1fr 1fr;
+
+    \u26A0\uFE0F **\u884C\u9AD8\u5FC5\u987B\u662F\u56FA\u5B9A\u7684**\uFF0C\u8FD9\u662F"\u4E0D\u8BBA\u5F55\u5165\u591A\u957F\u90FD\u4E0D\u4F1A\u6EA2\u51FA"\u7684\u6839\u672C\u4FDD\u8BC1\u3002
+
+    \u4E3A\u4EC0\u4E48\uFF1A\u6BCF\u9875\u56FA\u5B9A PER_PAGE \u4E2A\u4EA7\u54C1\u3001\u6392\u6210 2 \u884C\u3002\u884C\u9AD8\u9489\u6B7B\u4E4B\u540E\uFF0C
+    \u5361\u7247\u518D\u9AD8\u4E5F\u53EA\u80FD\u5360\u90A3\u4E48\u591A\uFF0C**\u5185\u5BB9\u518D\u591A\u4E5F\u4E0D\u4F1A\u628A\u9875\u6491\u7834**\u3002
+
+    \u884C\u9AD8\u600E\u4E48\u6765\u7684\uFF08**\u5B9E\u6D4B\uFF0C\u4E0D\u662F\u7EB8\u9762\u6362\u7B97**\uFF09\uFF1A
+        \u9875\u8FB9\u8DDD 60+60 + \u9875\u7709 43+26 + \u9875\u811A 33+15 = 237px\uFF0862.7mm\uFF09
+        A4 1123px \u2212 237px = 886px \u7559\u7ED9\u7F51\u683C
+        (886 \u2212 \u884C\u95F4\u8DDD 26.5) / 2 = 429.8px  \u2192  \u53D6 113mm\uFF0C\u7559\u4E00\u70B9\u4F59\u91CF
+
+    \u26A0\uFE0F \u6211\u7B2C\u4E00\u7248\u6309\u7EB8\u9762\u7B97\u6210 116.5mm\uFF0C\u5B9E\u6D4B\u6BCF\u884C\u591A 10px\u3001\u6574\u9875\u6EA2\u51FA 7px\u3002
+       **\u5B57\u4F53\u7684\u5B9E\u9645\u884C\u9AD8\u3001\u8FB9\u6846\u3001margin \u584C\u9677\u90FD\u548C\u7EB8\u9762\u8BA1\u7B97\u4E0D\u4E00\u6837**\uFF0C
+       \u6240\u4EE5\u8FD9\u4E2A\u6570\u5FC5\u987B\u91CF\u51FA\u6765\uFF0C\u4E0D\u80FD\u63A8\u3002\u6539\u4E86 PER_PAGE \u6216\u9875\u7709\u9875\u811A\u5C31\u91CD\u91CF\uFF1A
+           node tools/measure-page-parts.mjs
+
+    \u5B9E\u6D4B\u8FC7\u7684\u4E34\u754C\u70B9\uFF08\u4FEE\u4E4B\u524D\uFF0C\u884C\u9AD8\u4E0D\u56FA\u5B9A\uFF09\uFF1A
+        \u540D\u79F0 120 \u5B57          \u2192 \u6EA2\u51FA 40px
+        \u89C4\u683C 260 \u5B57          \u2192 \u6EA2\u51FA 14px
+        18 \u4E2A\u5356\u70B9            \u2192 \u6EA2\u51FA 36px
+        \u540D\u79F030+\u89C4\u683C120+8\u5356\u70B9 \u2192 \u6EA2\u51FA 40px   \u2190 \u8FD9\u4E2A\u662F\u73B0\u5B9E\u4E2D\u4F1A\u9047\u5230\u7684\u6B63\u5E38\u5F55\u5165
+    \u800C .page \u7528\u7684\u662F min-height\uFF0C\u8D85\u51FA\u7684\u90E8\u5206\u6253\u5370\u65F6**\u9759\u9ED8\u88C1\u6389**\uFF0C\u4E0D\u62A5\u9519\u3002
+
+    \u26A0\uFE0F \u8FD9\u6BB5 CSS \u5728**\u6A21\u677F\u5B57\u7B26\u4E32**\u91CC\uFF0C\u6CE8\u91CA\u4E2D**\u4E0D\u80FD\u51FA\u73B0\u53CD\u5F15\u53F7**\u2014\u2014
+       \u4E00\u4E2A\u53CD\u5F15\u53F7\u5C31\u4F1A\u628A\u5B57\u7B26\u4E32\u622A\u65AD\uFF0C\u62A5\u51FA ".page is not a function" \u8FD9\u79CD
+       \u5B8C\u5168\u770B\u4E0D\u51FA\u539F\u56E0\u7684\u9519\u3002\u6211\u5C31\u8FD9\u4E48\u8E29\u8FC7\u4E00\u6B21\u3002
+  */
+  .grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:7mm 6mm;
+    grid-auto-rows:113mm;            /* \u89C1\u4E0A\u9762\u7684\u5B9E\u6D4B\u63A8\u5BFC\uFF0C\u522B\u6309\u7EB8\u9762\u7B97 */
+  }
   .card {
     border:.6pt solid var(--line); border-radius:2.5pt; overflow:hidden;
     display:flex; flex-direction:column; page-break-inside:avoid;
+    min-height:0;                    /* \u5141\u8BB8\u5728\u56FA\u5B9A\u884C\u9AD8\u5185\u6536\u7F29\uFF0C\u5426\u5219\u5185\u5BB9\u4F1A\u628A\u884C\u9876\u9AD8 */
   }
   .card-img {
     width:100%; height:42mm; background:var(--accent-bg);
@@ -186,11 +220,34 @@ const HTML_SHELL = `<!doctype html>
     align-self:center; font-size:7pt; color:var(--ink-mute);
     padding-left:.6mm;
   }
-  .card-body { padding:2.6mm 3.8mm 3.0mm; display:flex; flex-direction:column; flex:1; }
+  .card-body { padding:2.6mm 3.8mm 3.0mm; display:flex; flex-direction:column; flex:1; min-height:0; }
   .card-cat { font-size:7.5pt; color:var(--accent); letter-spacing:.8pt; margin-bottom:1.4mm; }
-  .card-name { font-size:11.5pt; font-weight:700; line-height:1.35; margin:0 0 2.2mm; }
-  .card-spec { font-size:8.6pt; color:var(--ink-soft); line-height:1.62; margin:0 0 2.4mm; flex:1; }
-  .card-highlights { margin:0 0 2.8mm; }
+
+  /*
+    \u540D\u79F0\u4E0E\u89C4\u683C\u505A**\u884C\u6570\u622A\u65AD**\uFF0C\u8D85\u51FA\u7684\u7528\u7701\u7565\u53F7\u3002
+    \u56FA\u5B9A\u884C\u9AD8\u5DF2\u7ECF\u4FDD\u8BC1\u4E86\u4E0D\u6EA2\u51FA\uFF0C\u622A\u65AD\u662F\u4E3A\u4E86"\u6EA2\u51FA\u65F6\u770B\u8D77\u6765\u662F\u6709\u610F\u622A\u7684"\uFF0C
+    \u800C\u4E0D\u662F\u88AB\u5361\u7247\u8FB9\u7F18\u751F\u786C\u5207\u6389\u534A\u4E2A\u5B57\u3002
+
+    \u4E3A\u4EC0\u4E48\u662F 2 \u884C / 4 \u884C\uFF1A
+      \u540D\u79F0\u653E 2 \u884C\uFF0811.5pt \xD7 1.35 \u2248 5.5mm/\u884C\uFF09
+      \u89C4\u683C\u653E 4 \u884C\uFF088.6pt \xD7 1.62 \u2248 4.9mm/\u884C\uFF09
+      \u52A0\u4E0A\u54C1\u7C7B\u3001\u5356\u70B9\u3001\u4EF7\u683C\uFF0C\u603B\u9AD8\u843D\u5728 116.5mm \u5185\u8FD8\u7559\u6709\u4F59\u91CF\u3002
+    \u8981\u653E\u66F4\u957F\u7684\u5185\u5BB9\u5C31\u8C03\u8FD9\u91CC\uFF0C**\u5E76\u91CD\u65B0\u8DD1 tools/find-a4-limit.mjs \u786E\u8BA4**\u3002
+  */
+  .card-name {
+    font-size:11.5pt; font-weight:700; line-height:1.35; margin:0 0 2.2mm;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .card-spec {
+    font-size:8.6pt; color:var(--ink-soft); line-height:1.62; margin:0 0 2.4mm; flex:1;
+    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+    min-height:0;
+  }
+  /* \u5356\u70B9\u884C\u6570\u4E5F\u9650\u4E00\u4E0B\uFF1A26 \u4E2A\u5356\u70B9\u5B9E\u6D4B\u4F1A\u6EA2\u51FA 91px */
+  .card-highlights {
+    margin:0 0 2.8mm; overflow:hidden;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  }
   .tag {
     display:inline-block; font-size:7.6pt; color:var(--ink-soft);
     background:var(--accent-bg); border-radius:1.6pt;
