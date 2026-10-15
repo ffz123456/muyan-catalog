@@ -41,17 +41,43 @@ function fmtDate(d) {
   return `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
 }
 
+/**
+ * 一张产品卡片。
+ *
+ * 多图的处理方式：**主图 + 下面一排小图**，卡片总高不变。
+ *
+ * 为什么这么选（不是随手定的，是两条硬约束逼出来的）：
+ *   1. `.page` 用的是 `min-height`——内容超长会**静默撑高**，
+ *      打印只取 A4 高度、超出部分直接丢失。所以卡片高度必须可控。
+ *   2. 画册是 A4、每页固定 4 款。给每张图单独排一页会让页数爆炸
+ *      （50 款 × 3 张图 = 150+ 页），用户打印成本直接翻几倍。
+ *
+ * 小图条只占 12mm，塞得进现有卡片；再多就横向排下去，卡片本身不会变高。
+ */
 function cardHtml(p, images) {
-  const img = images.get(p.id);
+  // images: Map<产品id, string[]> —— 全部图的 data URI，第一张是主图
+  const uris = images.get(p.id) ?? [];
+  const main = uris[0];
+  const rest = uris.slice(1);
+
   const isCustom = String(p.stockStatus ?? '').includes('定制');
   const tags = String(p.highlights ?? '').split(/[/、,，]/).map((s) => s.trim()).filter(Boolean);
-  const imgHtml = img
-    ? `<img src="${img}" alt="${esc(p.name)}">`
-    : `<div class="no-img">暂无图片</div>`;
+
+  const mainHtml = main
+    ? `<img src="${main}" alt="${esc(p.name)}">`
+    : '<div class="no-img">暂无图片</div>';
+
+  // 小图最多显示 4 张——再多在 A4 上就糊成一团，看不清反而更糟
+  const thumbsHtml = rest.length
+    ? `<div class="card-thumbs">${rest.slice(0, 4).map((u) => `<img src="${u}" alt="">`).join('')}${
+      rest.length > 4 ? `<span class="thumbs-more">+${rest.length - 4}</span>` : ''
+    }</div>`
+    : '';
 
   return `
     <article class="card">
-      <div class="card-img">${imgHtml}</div>
+      <div class="card-img">${mainHtml}</div>
+      ${thumbsHtml}
       <div class="card-body">
         <div class="card-cat">${esc(p.category)}${p.supplier ? ' · ' + esc(p.supplier) : ''}</div>
         <h2 class="card-name">${esc(p.name)}</h2>
@@ -85,18 +111,35 @@ export async function renderCatalogHtml({ products, settings, groupByCategory = 
     throw new Error('renderCatalogHtml 需要 resolveImage 参数（图片解析函数）');
   }
 
-  // 预先把图片解析成 data URI：画册必须自包含，
-  // 发给客户后不能依赖网络、服务器或本机文件还在不在
+  /**
+   * 预先把图片解析成 data URI。
+   *
+   * 画册必须**自包含**：发给客户后不能依赖网络、服务器，也不能依赖本机文件还在。
+   * 所以图片一律内嵌。
+   *
+   * ⚠️ 内存代价（实测量过，别改大意了）：
+   *    N 张图同时变成 base64 放在内存里，HTML 体积 ≈ 图片总大小 × 4/3。
+   *    单机版是在**手机**上跑这一步的，图多了会吃紧。
+   *    所以这里按产品**串行**解析、不并发——
+   *    并发只会让峰值更高，不会更快（瓶颈是 base64 编码本身）。
+   *
+   * 图片数量**不设上限**：一款产品有多少张就解析多少张。
+   * 画册里主图 + 最多 4 张小图（见 cardHtml），多出来的不进画册但保留在产品里。
+   */
   const images = new Map();
   for (const p of products) {
-    const rel = Array.isArray(p.images) ? p.images[0] : p.images;
-    if (!rel) continue;
-    try {
-      const uri = await resolveImage(rel);
-      if (uri) images.set(p.id, uri);
-    } catch {
-      // 缺图不应中断整本画册
+    const refs = Array.isArray(p.images) ? p.images : (p.images ? [p.images] : []);
+    if (!refs.length) continue;
+    const uris = [];
+    for (const rel of refs) {
+      try {
+        const uri = await resolveImage(rel);
+        if (uri) uris.push(uri);
+      } catch {
+        // 单张缺图不该中断整本画册
+      }
     }
+    if (uris.length) images.set(p.id, uris);
   }
 
   const logo = settings.logo ? await resolveImage(settings.logo).catch(() => null) : null;
@@ -232,7 +275,26 @@ export const HTML_SHELL = `<!doctype html>
   }
   .card-img img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
   .no-img { font-size:8pt; color:var(--ink-mute); }
-  .card-body { padding:3.4mm 3.8mm 3.8mm; display:flex; flex-direction:column; flex:1; }
+
+  /*
+    多图时的小图条。
+    高度固定 12mm——**这是卡片总高不变的关键**：
+    小图再多也只是横向排（超出的已经在 cardHtml 里砍掉），
+    卡片不会被撑高，分页就不会溢出。
+  */
+  .card-thumbs {
+    display:flex; gap:1.4mm; padding:1.6mm 3.8mm 0;
+    height:12mm; box-sizing:content-box; align-items:flex-start;
+  }
+  .card-thumbs img {
+    width:13mm; height:11mm; object-fit:contain; display:block;
+    border:.4pt solid var(--line); border-radius:1.2pt; background:#fff;
+  }
+  .thumbs-more {
+    align-self:center; font-size:7pt; color:var(--ink-mute);
+    padding-left:.6mm;
+  }
+  .card-body { padding:2.6mm 3.8mm 3.0mm; display:flex; flex-direction:column; flex:1; }
   .card-cat { font-size:7.5pt; color:var(--accent); letter-spacing:.8pt; margin-bottom:1.4mm; }
   .card-name { font-size:11.5pt; font-weight:700; line-height:1.35; margin:0 0 2.2mm; }
   .card-spec { font-size:8.6pt; color:var(--ink-soft); line-height:1.62; margin:0 0 2.4mm; flex:1; }

@@ -198,42 +198,80 @@ export async function browserStatus() {
 export async function printToPdfViaCli(executable, htmlPath, outPath, { timeoutMs = 60000 } = {}) {
   const { spawn } = await import('node:child_process');
   const { pathToFileURL } = await import('node:url');
+  const fsp = await import('node:fs/promises');
+  const path = await import('node:path');
 
-  return new Promise((resolve, reject) => {
-    const args = [
-      '--headless',
-      '--disable-gpu',
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--no-pdf-header-footer',
-      '--run-all-compositor-stages-before-draw',
-      // 等字体与图片就位，否则可能出空白页
-      '--virtual-time-budget=4000',
-      `--print-to-pdf=${outPath}`,
-      pathToFileURL(htmlPath).href,
-    ];
+  /**
+   * ⚠️ **必须用 `stdio: 'ignore'`，不能用管道。**
+   *
+   * 实测踩到的硬约束（这台机器上，任何 Node 程序都一样）：
+   *     spawn(..., { stdio: ['ignore','pipe','pipe'] })  →  EPERM
+   *     spawn(..., { stdio: 'ignore' })                  →  正常
+   *     spawn(..., { stdio: 'inherit' })                 →  正常
+   *     spawn(..., {})              （默认就是管道）      →  EPERM
+   *   也就是说**只要走管道捕获子进程输出就被挡**。
+   *
+   * 原来的写法用管道收 stderr，本意是失败时能给出原因——
+   * 但那让这条路在受限环境里**根本起不来**，比"看不到报错"严重得多。
+   *
+   * 所以改成：输出**重定向到文件**，失败时去读那个文件。
+   * 这样既不用管道，又能拿到浏览器的报错。
+   */
+  const logPath = `${outPath}.browser.log`;
+  const logFd = await fsp.open(logPath, 'w');
+  try {
+    return await new Promise((resolve, reject) => {
+      const args = [
+        '--headless',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--no-pdf-header-footer',
+        /**
+         * ⚠️ 这两个参数会让 Chromium 起 mojo 的平台通道（命名管道），
+         *    而在受限环境里命名管道被拒 → 浏览器直接 FATAL 退出：
+         *      mojo platform_channel.cc:112  Check failed: 拒绝访问 (0x5)
+         *    实测去掉它们之后能正常出 PDF。
+         *
+         *    代价：不再"等字体和图片就位"，理论上偶发白图。
+         *    但起不来是 100% 失败，偶发白图是概率问题——
+         *    而且图片是内联的 data URI，本来就是同步可用的，
+         *    真正需要等的只有字体，所以这个代价可以接受。
+         */
+        // '--run-all-compositor-stages-before-draw',   // 触发 mojo，去掉
+        // '--virtual-time-budget=4000',                // 触发 mojo，去掉
+        `--print-to-pdf=${outPath}`,
+        pathToFileURL(htmlPath).href,
+      ];
 
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
+      const child = spawn(executable, args, { stdio: ['ignore', logFd.fd, logFd.fd] });
 
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('浏览器出 PDF 超时'));
-    }, timeoutMs);
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error('浏览器出 PDF 超时'));
+      }, timeoutMs);
 
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`启动浏览器失败：${err.message}`));
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        reject(new Error(`启动浏览器失败：${err.message}`));
+      });
+
+      child.on('close', async (code) => {
+        clearTimeout(timer);
+        if (code !== 0) {
+          // 从日志文件里取最后几行当原因——不用管道也能看到浏览器说了什么
+          let tail = '';
+          try {
+            const txt = await fsp.readFile(logPath, 'utf-8');
+            tail = txt.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
+          } catch { /* 日志都读不到就算了 */ }
+          reject(new Error(`浏览器退出码 ${code}${tail ? '：' + tail : ''}`));
+          return;
+        }
+        resolve({ ok: true });
+      });
     });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`浏览器退出码 ${code}${stderr ? '：' + stderr.slice(0, 300) : ''}`));
-        return;
-      }
-      resolve({ ok: true });
-    });
-  });
+  } finally {
+    await logFd.close();
+  }
 }

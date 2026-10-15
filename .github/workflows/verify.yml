@@ -53,10 +53,11 @@ jobs:
           node-version: '24'
 
       # 界面需要 PouchDB 浏览器构建；后端套件也用到 pouchdb（Node 构建）
+      # puppeteer-core 只给"多图排版"那一步用（要开浏览器量页面高度）
       - name: 安装验证所需依赖
         run: |
           cd sync && npm ci --no-audit --no-fund
-          cd ../app && npm install --no-save --no-audit --no-fund pouchdb
+          cd ../app && npm install --no-save --no-audit --no-fund pouchdb puppeteer-core
 
       - name: 生成 PouchDB 浏览器构建
         run: cd app && node tools/vendor-pouchdb.mjs
@@ -69,6 +70,24 @@ jobs:
       #    而不是"在我已经配好的机器上能跑的东西"。
       - name: 导入示例数据
         run: cd app && node tools/seed-sample-data.mjs
+
+      # 多图排版：图片数量不设上限之后，画册还塞得进 A4 吗。
+      #
+      # ⚠️ 这一项**只能在 CI 里做**：它要真的开浏览器逐页量高度，
+      #    而开发机上不一定有可用的浏览器。
+      #    实测：某些受限环境禁止命名管道，Chromium 的 mojo 起不来，
+      #    连命令行的 --print-to-pdf 都用不了（6 组参数全 FATAL）。
+      #    那种情况下用 tools/check-catalog-fit.mjs 做静态核算兜底。
+      - name: 多图排版
+        env:
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+        run: |
+          which chromium chromium-browser google-chrome || true
+          cd app
+          # 静态核算先跑（不需要浏览器），能立刻发现"卡片比 A4 还高"这类硬伤
+          node tools/check-catalog-fit.mjs
+          # 再真开浏览器逐页量高度
+          node tools/verify-multi-image.mjs
 
       - name: 启动服务端
         run: |

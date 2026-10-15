@@ -311,15 +311,21 @@
       <input type="hidden" name="id">
 
       <div class="field">
-        <span class="field-label">产品图片</span>
-        <div class="photo-row">
-          <img id="photoPreview" class="photo-preview" alt="" hidden>
-          <div class="photo-actions">
-            <button type="button" class="btn btn-primary btn-lg" id="btnCamera">📷 拍照 / 选图</button>
-            <button type="button" class="btn" id="btnPhotoClear" hidden>移除图片</button>
-          </div>
+        <span class="field-label">产品图片 <span class="opt">（可以放多张，第一张是画册主图）</span></span>
+        <div id="photoList" class="photo-list"></div>
+        <div class="photo-actions">
+          <button type="button" class="btn btn-primary btn-lg" id="btnCamera">📷 拍照 / 选图</button>
+          <button type="button" class="btn" id="btnPhotoClear" hidden>全部移除</button>
         </div>
-        <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+        <!--
+          为什么同时要 capture 和 multiple：
+            capture="environment" 让手机点按钮直接进**相机**（销售主要靠拍照录入）；
+            multiple 让"从相册选"时能一次选多张。
+            两者不冲突：相机应用一般一次只回一张，想拍多张就"拍一张再点一次"；
+            而部分机型的选择器会同时给出"相机/相册"两个入口，两种都能用。
+          图片数量**不设上限**。
+        -->
+        <input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden>
       </div>
 
       <label>产品名称 <span class="req">*</span>

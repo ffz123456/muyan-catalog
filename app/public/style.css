@@ -412,12 +412,74 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 
 /* ---------------- 拍照 / Logo ---------------- */
 .photo-row, .logo-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.photo-actions { display: flex; flex-direction: column; gap: 8px; }
+.photo-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .photo-preview {
   width: 120px; height: 90px; object-fit: contain;
   background: var(--accent-bg); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .logo-preview { max-height: 56px; max-width: 160px; object-fit: contain; }
+
+/*
+  产品图片列表 —— **数量不设上限**。
+  销售录一款产品常常有 3-5 张（正面/侧面/材质细节），
+  所以是一排可以横向滚动的缩略图，不是固定的几个格子。
+*/
+.opt { font-weight: 400; font-size: 13px; color: var(--ink-mute); }
+
+.photo-list {
+  display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px;
+  -webkit-overflow-scrolling: touch;             /* iOS 上滚得动 */
+}
+.photo-empty {
+  width: 100%; padding: 18px 12px; text-align: center;
+  font-size: 13px; color: var(--ink-mute);
+  background: var(--accent-bg); border: 1px dashed var(--line); border-radius: var(--radius);
+}
+
+.photo-item {
+  position: relative; flex: 0 0 auto; width: 108px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--accent-bg); overflow: hidden;
+}
+.photo-item img {
+  display: block; width: 108px; height: 108px;
+  object-fit: contain;                            /* 绝不裁切——家具图裁了就看不出形 */
+}
+
+/* 第一张是画册主图，必须一眼看出来，不能让人猜 */
+.photo-badge {
+  position: absolute; left: 0; top: 0;
+  padding: 2px 6px; font-size: 11px; line-height: 1.4;
+  color: #fff; background: var(--accent); border-bottom-right-radius: 4px;
+}
+.photo-no {
+  position: absolute; left: 0; top: 0;
+  padding: 2px 6px; font-size: 11px; line-height: 1.4;
+  color: var(--ink-soft); background: rgba(255, 255, 255, .85);
+  border-bottom-right-radius: 4px;
+}
+
+/*
+  删除与排序按钮。
+  为什么不做拖拽排序：手机上长按拖拽会和页面滚动打架，而且很多用户
+  根本不知道"可以拖"。箭头是显式的、一定点得中。
+*/
+.photo-del {
+  position: absolute; right: 0; top: 0; width: 26px; height: 26px;
+  border: none; border-radius: 0 0 0 6px; cursor: pointer;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 17px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.photo-move {
+  display: flex; border-top: 1px solid var(--line);
+}
+.photo-move button {
+  flex: 1; padding: 7px 0; border: none; cursor: pointer;
+  background: var(--paper); color: var(--ink-soft); font-size: 16px; line-height: 1;
+}
+.photo-move button + button { border-left: 1px solid var(--line); }
+.photo-move button:disabled { color: #cfc7bf; cursor: default; }
+.photo-move button:not(:disabled):active { background: var(--accent-bg); }
 
 /* ---------------- 底部操作条 ---------------- */
 .actionbar {

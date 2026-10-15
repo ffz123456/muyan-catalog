@@ -101,7 +101,12 @@ const state = {
   selected: new Set(),        // 画册里勾选的产品
   picking: new Set(),         // 选产品弹层里勾选的（尚未加入订单）
   editingProduct: null,
-  pendingPhoto: null,
+  /**
+   * 正在编辑的产品图片，**数量不设上限**。
+   * 每项：{ id: 图片引用, preview: 给 <img src> 用的地址 }
+   * 第一项就是画册主图。
+   */
+  pendingImages: [],
   editingOrder: null,      // { id?, items:[], ... }
   syncInfo: sync.snapshot(),
   /** 服务端能力探测结果（例如有没有浏览器能出 PDF）。见 applyServerPdfCapability */
@@ -523,16 +528,100 @@ function renderProducts() {
   });
 }
 
-function setPhotoPreview(src) {
-  const img = $('#photoPreview');
-  if (src) { img.src = src; img.hidden = false; $('#btnPhotoClear').hidden = false; }
-  else { img.removeAttribute('src'); img.hidden = true; $('#btnPhotoClear').hidden = true; }
+/**
+ * 渲染"已选图片"列表。
+ *
+ * 设计要点（都是为了让不懂技术的人也能用）：
+ *   · 图片数量**不设上限**，加多少都行
+ *   · **第一张就是画册主图**——用序号明确标出来，不让人猜
+ *   · 每张右上角一个 × 直接删，不用先进编辑态
+ *   · 左右两个箭头调顺序（手机上拖拽不好用，按箭头可靠得多）
+ *
+ * 为什么不用拖拽排序：手机上长按拖拽和页面滚动会打架，
+ * 而且很多用户不知道"可以拖"。箭头是显式的、点得中的。
+ */
+function renderPhotoList() {
+  const box = $('#photoList');
+  const list = state.pendingImages;
+  if (!box) return;
+
+  if (!list.length) {
+    box.innerHTML = '<div class="photo-empty">还没有图片，点下面的按钮拍照或选图</div>';
+    $('#btnPhotoClear').hidden = true;
+    return;
+  }
+  $('#btnPhotoClear').hidden = false;
+
+  box.innerHTML = list.map((ref, i) => `
+    <div class="photo-item" data-i="${i}">
+      <img src="${esc(ref.preview)}" alt="">
+      ${i === 0 ? '<span class="photo-badge">主图</span>' : `<span class="photo-no">${i + 1}</span>`}
+      <button type="button" class="photo-del" data-act="del" data-i="${i}" title="删除这张">×</button>
+      <div class="photo-move">
+        <button type="button" data-act="left" data-i="${i}" ${i === 0 ? 'disabled' : ''} title="往前挪">‹</button>
+        <button type="button" data-act="right" data-i="${i}" ${i === list.length - 1 ? 'disabled' : ''} title="往后挪">›</button>
+      </div>
+    </div>`).join('');
+
+  box.querySelectorAll('button[data-act]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const i = Number(b.dataset.i);
+      const act = b.dataset.act;
+      if (act === 'del') state.pendingImages.splice(i, 1);
+      if (act === 'left' && i > 0) {
+        [state.pendingImages[i - 1], state.pendingImages[i]] = [state.pendingImages[i], state.pendingImages[i - 1]];
+      }
+      if (act === 'right' && i < state.pendingImages.length - 1) {
+        [state.pendingImages[i + 1], state.pendingImages[i]] = [state.pendingImages[i], state.pendingImages[i + 1]];
+      }
+      renderPhotoList();
+    });
+  });
+}
+
+/**
+ * 单机版：把本机附件转成 data URI 当预览。
+ *
+ * 为什么单独一个函数、而且是异步的：
+ *   团队模式的图片在服务端，`/assets/<文件名>` 直接能当 src 用。
+ *   单机版图片是**本机 PouchDB 附件**，没有 URL，只能读出来转 data URI。
+ *   读附件是异步的，所以先渲染（显示空位）再补图，避免整个面板卡住等 IO。
+ *
+ * 竞态处理：用户在图片还没转完时又打开了另一个产品，
+ * 用打开时的"代次"判断，过期的结果直接丢弃——否则会把上一个产品的图
+ * 贴到当前这个上（这种串图很难查）。
+ */
+let soloPreviewGen = 0;
+async function fillSoloPreviews() {
+  const gen = ++soloPreviewGen;
+  const refs = state.pendingImages.map((x) => x.id);
+  for (let i = 0; i < refs.length; i++) {
+    if (gen !== soloPreviewGen) return;      // 已经换产品了，丢弃
+    try {
+      const uri = await backend.imageToDataUri(refs[i]);
+      if (gen !== soloPreviewGen) return;
+      if (uri && state.pendingImages[i]?.id === refs[i]) {
+        state.pendingImages[i].preview = uri;
+        renderPhotoList();
+      }
+    } catch { /* 单张读不出来就显示占位，不中断其它张 */ }
+  }
 }
 
 function openProductSheet(id) {
   const p = id ? state.products.find((x) => x.id === id) : null;
   state.editingProduct = p ?? null;
-  state.pendingPhoto = p?.images?.[0] ?? null;
+
+  /**
+   * 已有图片一次全带出来（不再只取第一张）。
+   *
+   * preview 是给 <img src> 用的：
+   *   团队模式图片在服务端 → /assets/<文件名>
+   *   单机版图片在本机附件里 → 要转 data URI（异步，下面单独补）
+   */
+  state.pendingImages = (p?.images ?? []).map((ref) => ({ id: ref, preview: `/assets/${ref}` }));
+  if (state.solo) fillSoloPreviews();
 
   $('#sheetTitle').textContent = p ? '编辑产品' : '添加产品';
   $('#btnDelete').hidden = !p;
@@ -546,7 +635,7 @@ function openProductSheet(id) {
   f.elements.price.value = p?.price ?? '';
   f.elements.stockStatus.value = p?.stockStatus ?? '现货';
   f.elements.supplier.value = p?.supplier ?? '';
-  setPhotoPreview(state.pendingPhoto ? `/assets/${state.pendingPhoto}` : null);
+  renderPhotoList();
 
   const cats = [...new Set(state.products.map((x) => x.category).filter(Boolean))].sort();
   $('#catList').innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join('');
@@ -558,8 +647,7 @@ function openProductSheet(id) {
 function closeProductSheet() {
   $('#sheet').hidden = true;
   state.editingProduct = null;
-  state.pendingPhoto = null;
-  setPhotoPreview(null);
+  state.pendingImages = [];
 }
 
 /* ------------------------------ 画册 ------------------------------ */
@@ -1081,23 +1169,53 @@ function bind() {
   $('#btnAddEmpty').addEventListener('click', () => openProductSheet(null));
 
   $('#btnCamera').addEventListener('click', () => $('#photoInput').click());
+  /**
+   * 选图/拍照 —— **支持一次多张，数量不设上限**。
+   *
+   * 为什么要一次处理多张而不是"一张一张来"：
+   *   销售录一款产品常常有 3-5 张（正面/侧面/材质细节），
+   *   一张一张点会点到烦。从相册选时可以一次全选。
+   *
+   * 为什么串行 await 而不是并发：
+   *   图片压缩是 CPU 密集的（canvas 重绘），手机上并发几张会把主线程卡住、
+   *   界面像死了一样。串行慢一点，但每一张都即时看到进度。
+   */
   $('#photoInput').addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
+    const files = [...(e.target.files ?? [])];
     e.target.value = '';
-    if (!file) return;
-    try {
-      const dataUrl = await compressImage(file);
-      // 走 backend：团队模式存服务端，单人模式存本机附件
-      const blob = await (await fetch(dataUrl)).blob();
-      const saved = await backend.saveImage(blob, file.name || 'photo.jpg');
-      state.pendingPhoto = saved.id;
-      setPhotoPreview(await backend.imageToDataUri(saved.id));
-      toast(`图片已就绪（${saved.sizeKB} KB）`);
-    } catch (err) { toast(err.message, true); }
+    if (!files.length) return;
+
+    let ok = 0;
+    const fails = [];
+    for (const file of files) {
+      try {
+        const dataUrl = await compressImage(file);
+        const blob = await (await fetch(dataUrl)).blob();
+        // 走 backend：团队模式存服务端，单人模式存本机附件
+        const saved = await backend.saveImage(blob, file.name || 'photo.jpg');
+        state.pendingImages.push({
+          id: saved.id,
+          // 立刻用刚压好的 data URI 显示，不等服务端回读——省一次往返，也不会闪
+          preview: dataUrl,
+        });
+        renderPhotoList();
+        ok++;
+      } catch (err) {
+        fails.push(`${file.name || '图片'}：${err.message}`);
+      }
+    }
+
+    if (ok) toast(files.length > 1 ? `已加入 ${ok} 张` : '图片已就绪');
+    if (fails.length) {
+      // 一张失败不该让整批静默丢掉——说清哪张、为什么
+      toast(`${fails.length} 张失败：${fails[0]}`, true);
+    }
   });
   $('#btnPhotoClear').addEventListener('click', () => {
-    state.pendingPhoto = null;
-    setPhotoPreview(null);
+    if (!state.pendingImages.length) return;
+    if (!confirm(`移除全部 ${state.pendingImages.length} 张图片？\n（保存前都可以反悔）`)) return;
+    state.pendingImages = [];
+    renderPhotoList();
   });
 
   $('#productForm').addEventListener('submit', async (e) => {
@@ -1112,7 +1230,8 @@ function bind() {
       price: Number(f.elements.price.value) || 0,
       stockStatus: f.elements.stockStatus.value,
       supplier: f.elements.supplier.value.trim(),
-      images: state.pendingPhoto ? [state.pendingPhoto] : [],
+      // 全部图片按当前顺序提交，第一张就是画册主图
+      images: state.pendingImages.map((x) => x.id),
     };
     if (!body.name) return toast('请填写产品名称', true);
     try {
