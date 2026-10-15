@@ -38,8 +38,15 @@
   <span class="solo-warn">记得定期在「设置」里导出备份。</span>
 </div>
 
-<!-- 未登录时遮住全部界面：没有身份就没有 sales_id，出的单无处归属 -->
-<div class="login" id="loginGate" hidden>
+<!--
+  未登录时遮住全部界面：没有身份就没有 sales_id，出的单无处归属。
+
+  ⚠️ **不要给这个元素加 `hidden`** —— 默认就该是锁着的。
+  如果默认隐藏，那么任何让 JS 提前失败的原因（网络慢、某个接口报错）
+  都会让闸门一直不显示、主界面裸露，用户看到一堆点了没用的按钮。
+  登录闸门要"失败时关闭"，不要"失败时打开"。
+-->
+<div class="login" id="loginGate">
   <div class="login-box">
     <h2>登录</h2>
     <p class="hint">
@@ -387,8 +394,25 @@
   </div>
 </div>
 
-<!-- PouchDB 浏览器构建（本地离线库）。缺失时请运行 tools/vendor-pouchdb.mjs -->
+<!--
+  加载顺序要求：
+    1. polyfills.js **必须最先**——它给旧浏览器补上 replaceAll / Array.at 等方法，
+       后面的模块在解析和执行时都假设这些方法已经存在
+    2. pouchdb —— 本地离线库
+    3. app.js —— **降级后的产物**，不是 app.mjs
+
+  ⚠️ 为什么加载 .js 而不是 .mjs：
+    源码里的 `??`（空值合并）要 Chrome 80+。旧手机（Android 10 上的 Edge）
+    内核停在 **Chrome 77**，遇到 `??` 直接 SyntaxError，
+    **整个脚本一行都不执行** —— 页面骨架在、但账号下拉是空的、一个接口都不调。
+    所以 `tools/build-web.mjs` 会把 `public/*.mjs` 降级成 `public/*.js`。
+
+  ⚠️ 改了 public/*.mjs 之后**必须重新构建**，否则页面加载的还是旧的 .js。
+    服务端启动时会自动构建，所以正常使用不用管；手工调试时跑：
+        node tools/build-web.mjs
+-->
+<script src="/polyfills.js"></script>
 <script src="/vendor/pouchdb.min.js"></script>
-<script type="module" src="/app.mjs"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

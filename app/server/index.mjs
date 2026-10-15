@@ -651,13 +651,20 @@ async function serveStatic(req, res, url) {
   /**
    * 共享模块（app/shared/）。
    *
-   * 画册排版逻辑是服务端与浏览器**共用**的一份，浏览器要能直接 import 它。
+   * 画册排版逻辑是服务端与浏览器**共用**的一份。
    * 它不在 public/ 下（那样服务端就得从 public 里 import，目录关系更乱），
    * 所以这里单独开一条只读路由。
    *
-   * ⚠️ 只允许 .mjs，且限制在 shared 目录内——别把整个 app 源码暴露出去。
+   * ⚠️ 只允许 shared 目录内的 .mjs —— 别把整个 app 源码暴露出去。
+   *
+   * ⚠️ **`.js` 必须放行、交给下面的静态路由处理，不能在这里找。**
+   *    浏览器不能用源码 shared/catalog.mjs（里面有 `??`，旧手机内核停在
+   *    Chromium 77，解析就失败）。tools/build-web.mjs 把它降级成
+   *    **public/shared/catalog.js** —— 注意是 public 下，不是 app/shared 下。
+   *    我第一版在这里也放开了 .js，结果它去 app/shared/ 找、找不到就 404，
+   *    而产物明明在 public/shared/ —— 白查了一轮。
    */
-  if (rel.startsWith('/shared/')) {
+  if (rel.startsWith('/shared/') && rel.endsWith('.mjs')) {
     const sub = rel.slice('/shared/'.length);
     if (!/^[\w.-]+\.mjs$/.test(sub)) return fail(res, 403, '非法路径');
     const file = safeJoin(path.join(HERE, '..', 'shared'), sub);
@@ -716,6 +723,31 @@ const server = http.createServer(async (req, res) => {
 async function bootstrap() {
   // 目录一次建齐（含临时目录）。便携版解压后第一次运行也靠它。
   ensureDirsSync();
+
+  /**
+   * 前端降级构建 —— **每次启动都跑，自动判断要不要重建**。
+   *
+   * 为什么要放在启动里、而不是"让开发者记得跑"：
+   *   源码里的 `??`（空值合并）要 Chrome 80+，而旧手机（Android 10 上的 Edge）
+   *   内核停在 Chrome 77 —— 遇到 `??` 直接语法错误，**整个脚本一行都不执行**。
+   *   现象是"页面骨架在、但账号下拉空的、一个接口都不调"，极难排查。
+   *
+   *   如果构建要靠人记得跑，那么迟早有人改了 public/*.mjs 却忘了构建：
+   *   页面加载的还是旧的 .js，**改了代码却没生效**，而且不报任何错。
+   *   所以宁可每次启动多花 200ms 检查一遍。
+   *
+   * 构建失败**不阻断启动**——服务端的主要职责是存数据，
+   * 前端构建坏了也应该让用户能进来看看到底怎么回事，而不是整个打不开。
+   */
+  try {
+    const { buildIfStale } = await import('../tools/build-web.mjs');
+    const r = await buildIfStale();
+    if (r.rebuilt) console.log(`  前端已降级构建（目标 ${r.target}）：${r.files} 个文件，用时 ${r.ms} ms`);
+  } catch (err) {
+    console.warn(`  ⚠️  前端降级构建失败：${err.message}`);
+    console.warn('      页面可能加载不到最新代码。手工执行：node tools/build-web.mjs');
+  }
+
   await getSettings();          // 不存在时返回默认值
 
   // 首次运行会为每个账号生成随机初始密码；这里打印一次（不写入任何日志文件）

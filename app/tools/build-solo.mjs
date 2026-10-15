@@ -257,6 +257,11 @@ async function assemble(bundledJs) {
   const css = await fs.readFile(path.join(PUBLIC, 'style.css'), 'utf-8');
   // PouchDB 是 UMD，挂在全局；内联它，避免依赖外部文件
   const pouch = await fs.readFile(path.join(PUBLIC, 'vendor', 'pouchdb.min.js'), 'utf-8');
+  // 运行时补丁（当前为空，保留机制）
+  let polyfills = '';
+  try {
+    polyfills = await fs.readFile(path.join(PUBLIC, 'polyfills.js'), 'utf-8');
+  } catch { /* 没有就算了，本来就可以为空 */ }
 
   let out = html;
   const repl = (re, to) => {
@@ -265,12 +270,48 @@ async function assemble(bundledJs) {
   };
 
   repl(/<link[^>]*href="\/style\.css"[^>]*>/, () => `<style>\n${css}\n</style>`);
+
+  /**
+   * ⚠️ 这两条替换的**目标字符串必须和 index.html 保持一致**。
+   *
+   * 实测踩到：我把 index.html 从 `<script src="/app.mjs">` 改成了
+   * `<script src="/app.js">`（因为源码要让 build-web.mjs 降级），
+   * 但**忘了同步改这里的正则**。结果单机版产物里残留着
+   * `<script src="/app.js">`，在 file:// 下会去解析成 `C:/app.js`：
+   *     Access to script at 'file:///C:/app.js' blocked by CORS policy
+   * 页面标题和骨架都在（那是 HTML 里写死的），但**脚本一行都没跑**。
+   *
+   * 这种"改了一处、忘了另一处"的问题，靠人记得是不行的，
+   * 所以下面加了一步：**构建完检查 HTML 里没有残留的外链 script**。
+   */
+  repl(
+    /<script src="\/polyfills\.js"><\/script>/,
+    // polyfills 目前是空的（源码没用到旧内核缺的 API），
+    // 但仍然保留这个位置：以后真加了补丁，单机版也要带上
+    () => `<script>\n${polyfills}\n</script>`,
+  );
   repl(
     /<script src="\/vendor\/pouchdb\.min\.js"><\/script>/,
     // 去掉 sourceMappingURL，否则浏览器会去找 .map 文件报 404
     () => `<script>\n${pouch.replace(/\/\/# sourceMappingURL=.*$/m, '')}\n</script>`,
   );
-  repl(/<script type="module" src="\/app\.mjs"><\/script>/, () => `<script>\n${bundledJs}\n</script>`);
+  repl(/<script type="module" src="\/app\.js"><\/script>/, () => `<script>\n${bundledJs}\n</script>`);
+
+  /**
+   * 兜底：**产物里不允许还有指向外部脚本的引用**。
+   *
+   * 单机版是"一个文件发过去点开就用"，任何外链都必然失败
+   * （file:// 下同目录也取不到，路径语义和 http 不一样）。
+   * 与其等用户在手机上看到白屏，不如在这里直接构建失败。
+   */
+  const leftover = out.match(/<script[^>]*\bsrc=/gi) ?? [];
+  if (leftover.length) {
+    problems.push(
+      `产物里还有 ${leftover.length} 个外链 script（单机版必须全部内联）：`
+      + leftover.join('、')
+      + '  —— 多半是 index.html 改了标签、而上面的替换正则没跟着改',
+    );
+  }
 
   return out;
 }
@@ -305,8 +346,46 @@ const banner = `/* 单人模式单文件版 —— 由 tools/build-solo.mjs 生�
  */
 `;
 
+/**
+ * ⚠️ **必须把拼好的代码降级到 Chrome 77，不能直接嵌入。**
+ *
+ * 实测事故：旧手机（OPPO A3，Android 10）上的 Edge 内核是 **Chromium 77**，
+ * 不支持 `??`（空值合并，要 Chrome 80+）。产物里有 82 处 `??`、64 处 `?.`，
+ * 结果**整个脚本解析失败、一行都不执行**。现象是：
+ *   页面骨架在、账号下拉是空的、什么都点不动，而且不报错。
+ *
+ * 而单机版恰恰是"发给手机点开就用"的那个交付物 ——
+ * 它比网页版更依赖旧手机能跑，所以这一步不能省。
+ *
+ * 放在拼接**之后**做：模块之间用命名空间对象互相引用，
+ * 拼接阶段必须看到原始模块结构；降级只关心语法，拼完再转最简单也最不容易出错。
+ *
+ * 顺带说明 `format: 'iife'`：拼出来的是一整段脚本，外面套一层 IIFE
+ * 可以避免污染全局（原来的顶层 `var` 会挂到 window 上）。
+ */
+async function lowerForOldBrowsers(code) {
+  let esbuild;
+  try {
+    esbuild = await import('esbuild');
+  } catch (e) {
+    console.error('\n  ✗ 缺少 esbuild，无法降级到旧浏览器可用的语法。');
+    console.error('    安装：npm install --save-dev esbuild');
+    console.error('    为什么必须降级：旧安卓机（Chromium 77）遇到 ?? 会整个脚本解析失败，');
+    console.error('    页面看着在、但什么都点不动。');
+    console.error(`    (${e.code ?? e.message})\n`);
+    process.exit(1);
+  }
+  const r = await esbuild.transform(code, {
+    target: 'chrome77',
+    format: 'iife',
+    loader: 'js',
+  });
+  return r.code;
+}
+
 await fs.mkdir(OUT_DIR, { recursive: true });
-const finalHtml = await assemble(banner + bundleJs);
+const loweredJs = await lowerForOldBrowsers(bundleJs);
+const finalHtml = await assemble(banner + loweredJs);
 const outFile = path.join(OUT_DIR, '木言-单机版.html');
 await fs.writeFile(outFile, finalHtml, 'utf-8');
 

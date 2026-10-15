@@ -52,12 +52,24 @@ jobs:
         with:
           node-version: '24'
 
-      # 界面需要 PouchDB 浏览器构建；后端套件也用到 pouchdb（Node 构建）
-      # puppeteer-core 只给"多图排版"那一步用（要开浏览器量页面高度）
+      # 依赖分三部分，缺一个后续步骤就会以奇怪的方式失败：
+      #   · pouchdb        界面需要浏览器构建，后端套件用 Node 构建
+      #   · puppeteer-core 多图排版 / 单机版验证要真开浏览器量高度
+      #   · esbuild        前端降级构建（devDependency），
+      #                    把 ?? / ?. 转成旧手机能解析的写法
+      #
+      # ⚠️ 这里**不能**用 `npm install --no-save <包>` 来装 pouchdb——
+      #    它会把不在 package.json 里的包当成"多余依赖"顺手清掉，
+      #    本机就被这个坑过一次（esbuild 被删，服务端起不来）。
+      #    先 `npm ci` 按清单装齐，再单独 --no-save 补 pouchdb。
       - name: 安装验证所需依赖
         run: |
           cd sync && npm ci --no-audit --no-fund
-          cd ../app && npm install --no-save --no-audit --no-fund pouchdb puppeteer-core
+          cd ../app
+          npm ci --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund pouchdb
+          # 装完立刻验证，别等跑到一半才发现缺东西
+          node -e "require.resolve('esbuild'); require.resolve('puppeteer-core'); console.log('依赖就绪')"
 
       - name: 生成 PouchDB 浏览器构建
         run: cd app && node tools/vendor-pouchdb.mjs
@@ -78,16 +90,37 @@ jobs:
       #    实测：某些受限环境禁止命名管道，Chromium 的 mojo 起不来，
       #    连命令行的 --print-to-pdf 都用不了（6 组参数全 FATAL）。
       #    那种情况下用 tools/check-catalog-fit.mjs 做静态核算兜底。
+      #
+      # ⚠️ check-a4-detects-overflow 是"检查的检查"：
+      #    之前 assertLayout 把视口高度设成了 A4 高度，导致**永远报通过**——
+      #    一个不报错的死断言。这一步故意塞爆内容，确认它真的有检测能力。
+      #    少了它，一个假绿灯会在 CI 里绿一辈子。
       - name: 多图排版
         env:
           PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
         run: |
           which chromium chromium-browser google-chrome || true
           cd app
-          # 静态核算先跑（不需要浏览器），能立刻发现"卡片比 A4 还高"这类硬伤
           node tools/check-catalog-fit.mjs
-          # 再真开浏览器逐页量高度
           node tools/verify-multi-image.mjs
+          node tools/check-a4-detects-overflow.mjs
+
+      # 旧手机兼容性：源码里的 ?? / ?. 要 Chrome 80+，
+      # 而 Android 10 上的 Edge 内核停在 77 —— 直接 SyntaxError，整个脚本不执行。
+      # 这里验证降级产物真的不含这些语法。
+      #
+      # 同时打包单机版并在真浏览器里打开它（file:// 协议）——
+      # 单机版是"发个文件到手机点开就用"的交付物，
+      # 曾经因为残留 <script src="/app.js"> 而在 file:// 下整个加载失败，
+      # 那次的症状是"标题和骨架都在、但脚本一行没跑"，必须由 CI 兜住。
+      - name: 旧浏览器兼容性
+        env:
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+        run: |
+          cd app
+          node tools/verify-legacy-compat.mjs
+          node tools/build-solo.mjs
+          node tools/verify-solo-in-browser.mjs
 
       - name: 启动服务端
         run: |

@@ -86,7 +86,21 @@ export async function assertLayout(html, puppeteer, { writeDebugHtml, launchOpti
         .filter((im) => !im.complete)
         .map((im) => new Promise((r) => { im.onload = im.onerror = r; }))
     ));
-    await page.setViewport({ width: A4.W_PX, height: A4.H_PX, deviceScaleFactor: 1 });
+    /**
+     * ⚠️ **视口高度必须远大于 A4，不能就设成 A4 高度。**
+     *
+     * 原写法是 `height: A4.H_PX`（1123px），而 `.page` 用的是
+     * `min-height: 297mm`。视口本身只有 1123px 时，
+     * **内容超出也量不出来** —— 量到的永远是"正好 1123px、余量 0px"，
+     * 于是断言永远通过。这是**假绿灯**，比不检查更危险：
+     * 让人以为排版验证过了，其实什么都没验证。
+     *
+     * 实测踩到：6 款产品的画册三页全报"1123px、余量 0px"，
+     * 看着整齐得不真实，实际上是被视口卡住了。
+     *
+     * 现在放开到 6000px（约 5 个 A4 高），内容有多少量多少。
+     */
+    await page.setViewport({ width: A4.W_PX, height: 6000, deviceScaleFactor: 1 });
 
     const pages = await page.evaluate((h) => Array.from(document.querySelectorAll('section.page')).map((el, i) => {
       const r = el.getBoundingClientRect();
